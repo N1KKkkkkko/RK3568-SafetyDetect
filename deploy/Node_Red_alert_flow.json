@@ -1,0 +1,156 @@
+[
+  {
+    "id": "safe-tab-alerts",
+    "type": "tab",
+    "label": "工地安全告警推送(SafeDetect)",
+    "disabled": false,
+    "info": "工地安全监控平台统一告警通道。节点 id 全部带 safe- 前缀，避免和同一个 Node-RED 里的其它流程冲突。订阅：safe/+/alert（着装 unsafe 与烟雾 smoke 用 event 字段区分）、safe/+/status。手机端只订阅 safe_<cam> 一个主题。"
+  },
+  {
+    "id": "safe-broker-local",
+    "type": "mqtt-broker",
+    "z": "safe-tab-alerts",
+    "name": "SafeDetect broker (1883 共用 / 隔离时改 1884)",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  },
+  {
+    "id": "safe-mqtt-in-alert",
+    "type": "mqtt in",
+    "z": "safe-tab-alerts",
+    "name": "safe/<cam>/alert (着装+烟雾)",
+    "topic": "safe/+/alert",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "safe-broker-local",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 180,
+    "y": 140,
+    "wires": [
+      [
+        "safe-fn-alert"
+      ]
+    ]
+  },
+  {
+    "id": "safe-fn-alert",
+    "type": "function",
+    "z": "safe-tab-alerts",
+    "name": "[SafeDetect] build ntfy message",
+    "func": "// MQTT topic: safe/<cam>/alert —— 工地安全监控统一告警通道\n//   event=unsafe 着装违规 / event=smoke 烟雾；其它前缀一律丢弃\nvar parts = msg.topic.split(\"/\");\nvar kind = parts[0] || \"\";\nif (kind !== \"safe\") { return null; }\nvar dev = (parts[1] || \"cam1\").replace(/[^a-zA-Z0-9_-]/g, \"_\");\nvar data = msg.payload;\nif (typeof data === \"string\") { try { data = JSON.parse(data); } catch (e) { data = {}; } }\nif (!data || typeof data !== \"object\") { data = {}; }\nvar evt = data.event || \"alert\";\nvar ts = (data.ts_ip && String(data.ts_ip).indexOf(\".\") >= 0) ? String(data.ts_ip) : \"127.0.0.1\";\nvar IMG_BASE = \"http://127.0.0.1:8092/\";\nvar imgName = data.image ? String(data.image).split(\"/\").pop() : null;\nvar vidName = data.video ? String(data.video).split(\"/\").pop() : null;\nvar title = (evt === \"smoke\") ? \"烟雾告警\" : (evt === \"unsafe\") ? \"安全着装告警\" : \"安全告警\";\nvar lines = [];\nif (data.time) { lines.push(\"时间: \" + data.time); }\nif (data.camera_id) { lines.push(\"点位: \" + data.camera_id); }\nif (evt === \"smoke\") { if (data.level) { lines.push(\"浓度: \" + data.level); } if (data.ao_raw !== undefined && data.ao_raw !== null) { lines.push(\"AO 原始值: \" + data.ao_raw); } if (data.do !== undefined) { lines.push(\"DO 电平: \" + data.do); } }\nelse { if (data.unsafe !== undefined || data.partial !== undefined) { lines.push(\"完全违规(帽衣都没): \" + (data.unsafe || 0) + \" 人; 部分违规: \" + (data.partial || 0) + \" 人\"); } if (data.persons && data.persons.length) { var det = []; for (var i = 0; i < Math.min(data.persons.length, 6); i++) { var p = data.persons[i]; det.push(\"#\" + (p.track_id == null ? (i + 1) : p.track_id) + \" \" + p.status + \"(帽\" + Number(p.helmet_conf || 0).toFixed(2) + \"/衣\" + Number(p.vest_conf || 0).toFixed(2) + \")\"); } lines.push(\"人员: \" + det.join(\", \")); } }\nif (imgName) { lines.push(\"截图: http://\" + ts + \":8092/\" + imgName); }\nif (vidName) { lines.push(\"录像: http://\" + ts + \":8092/\" + vidName); }\nvar payload = { topic: \"safe_\" + dev, title: title, message: lines.join(\"\\n\") || \"检测到告警\", priority: 4 };\nif (imgName) { payload.attach = IMG_BASE + imgName; payload.click = \"http://\" + ts + \":8092/\" + imgName; }\npayload.actions = [{ action: \"view\", label: \"查看实时画面\", url: \"http://\" + ts + \":8090/\" }];\nmsg.payload = payload;\nmsg.headers = { \"content-type\": \"application/json\" };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "safe-http-ntfy",
+        "safe-debug-out"
+      ]
+    ]
+  },
+  {
+    "id": "safe-http-ntfy",
+    "type": "http request",
+    "z": "safe-tab-alerts",
+    "name": "[SafeDetect] POST ntfy(8081)",
+    "method": "POST",
+    "ret": "obj",
+    "pay": "obj",
+    "url": "http://127.0.0.1:8081",
+    "tls": "",
+    "headers": [],
+    "proxy": "",
+    "auth": "",
+    "timeout": "",
+    "follow-redirects": true,
+    "x": 680,
+    "y": 140,
+    "wires": [
+      [
+        "safe-debug-out"
+      ]
+    ]
+  },
+  {
+    "id": "safe-debug-out",
+    "type": "debug",
+    "z": "safe-tab-alerts",
+    "name": "[SafeDetect] debug",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 870,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "safe-mqtt-in-status",
+    "type": "mqtt in",
+    "z": "safe-tab-alerts",
+    "name": "safe/<cam>/status",
+    "topic": "safe/+/status",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "safe-broker-local",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "x": 180,
+    "y": 300,
+    "wires": [
+      [
+        "safe-fn-status"
+      ]
+    ]
+  },
+  {
+    "id": "safe-fn-status",
+    "type": "function",
+    "z": "safe-tab-alerts",
+    "name": "[SafeDetect] build ntfy startup msg",
+    "func": "// safe/<cam>/status：检测服务/摄像头状态\nvar parts = msg.topic.split(\"/\");\nvar kind = parts[0] || \"\";\nif (kind !== \"safe\") { return null; }\nvar dev = (parts[1] || \"cam1\").replace(/[^a-zA-Z0-9_-]/g, \"_\");\nvar data = msg.payload;\nif (typeof data === \"string\") { try { data = JSON.parse(data); } catch (e) { data = {}; } }\nif (!data || typeof data !== \"object\") { data = {}; }\nvar ts = (data.ts_ip && String(data.ts_ip).indexOf(\".\") >= 0) ? String(data.ts_ip) : \"127.0.0.1\";\nvar evt = (data.event === \"startup\") ? \"系统启动，安全监控已运行\" : (data.event === \"reconnect\") ? \"摄像头重连成功\" : (data.event === \"camera_lost\") ? \"摄像头未连接，请检查 USB / 设备节点\" : \"设备状态更新\";\nvar title = (data.event === \"camera_lost\") ? \"摄像头未连接\" : \"摄像头已连接\";\nvar priority = (data.event === \"camera_lost\") ? 3 : 2;\nvar payload = { topic: \"safe_\" + dev, title: title, message: evt + (data.time ? \"（\" + data.time + \"）\" : \"\"), priority: priority, actions: [{ action: \"view\", label: \"查看实时画面\", url: \"http://\" + ts + \":8090/\" }] };\nmsg.payload = payload;\nmsg.headers = { \"content-type\": \"application/json\" };\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 300,
+    "wires": [
+      [
+        "safe-http-ntfy",
+        "safe-debug-out"
+      ]
+    ]
+  }
+]

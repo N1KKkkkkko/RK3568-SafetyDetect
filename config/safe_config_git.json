@@ -1,0 +1,109 @@
+{
+  "_help": "SafeDetect_V0.01 运行配置（公开模板，UTF-8）。本文件只放通用/默认值，可直接上传；真实部署值放同目录的 safe_config.json（不进仓库）。程序优先读 safe_config.json，没有才用本文件。",
+  "_ports": "本包端口：MJPEG 实时预览 8090、告警截图/录像（静态 HTTP）8092；共用服务：MQTT 1883、Node-RED 1880、ntfy 8081。告警统一走 safe/<cam>/alert（着装 unsafe 与烟雾 smoke 同一条通道，用 event 字段区分）",
+  "camera_id": "cam1",
+  "network": {
+    "_note": "网络探测目标，只为自动猜本机 IP 用（UDP connect 只挑路由、不发包）；按现场网关/路由填，换网段不用改代码",
+    "lan_probe": ["192.168.1.1", "8.8.8.8"]
+  },
+  "ports": {
+    "_note": "端口：ntfy=手机推送服务；alert_http=告警截图/录像的静态 HTTP。同板跑多个项目时在这里错开（预览端口在 runtime.stream）",
+    "ntfy": 8081,
+    "alert_http": 8092
+  },
+  "ip": {
+    "_note": "本机对外 IP。留空 = 程序启动时自动探测（Tailscale 虚拟 IP 优先，其次局域网 IP），无需填写；如需固定，在此填值即可（会优先于自动探测）",
+    "value": ""
+  },
+  "notify": {
+    "_note": "通知里的链接主机。留空 = 自动探测（同 ip 节）；也可直接填 Tailscale 虚拟 IP",
+    "ts_ip": ""
+  },
+  "mqtt": {
+    "_note": "MQTT 告警通道：broker 为本地 mosquitto；告警主题 = <topic_prefix>/<camera_id>/alert。broker 指向其它主机时按实际填写（含账号密码）",
+    "broker": "127.0.0.1",
+    "port": 1883,
+    "username": "",
+    "password": "",
+    "topic_prefix": "safe",
+    "qos": 1,
+    "heartbeat_interval": 30
+  },
+  "alerts": {
+    "_note": "告警动作：cooldown=冷却秒数；video_pre_sec/post_sec=录像含报警前/后各几秒；max_records=最多保留告警记录对数(图片+视频)，超限自动删最旧",
+    "cooldown": 60,
+    "video_pre_sec": 3.0,
+    "video_post_sec": 5.0,
+    "max_records": 100
+  },
+  "smoke": {
+    "_note": "MQ-2 烟雾传感器。do 节=数字量：gpiochip/line 按实际接线填写（RK 的 bank*32+index 约定），active_low=true 表示检测到烟雾时 DO 被拉低（LM393 常见接法，先用 app/smoke_sensor.py --watch 确认极性）。ao 节=模拟量：iio_path=ADC 原始值路径，vref/bits=ADC 参考电压与位数，divider=分压比，alarm_raw=按 ADC 原始值报警的阈值，alarm_hysteresis=迟滞（触发后要跌破 阈值-迟滞 才解除）。烟雾告警与着装告警共用前缀：<prefix>/<cam>/alert（event=smoke）；遥测/心跳走 <prefix>/<cam>/smoke/*。",
+    "topic_prefix": "safe",
+    "do": {
+      "gpiochip": "gpiochip1",
+      "line": 1,
+      "active_low": true
+    },
+    "ao": {
+      "enable": true,
+      "alarm": true,
+      "alarm_raw": 150,
+      "alarm_hysteresis": 10,
+      "alarm_volt": null,
+      "iio_path": "/sys/bus/iio/devices/iio:device0/in_voltage0_raw",
+      "vref": 1.8,
+      "bits": 10,
+      "divider": 0.4
+    },
+    "poll_sec": 0.5,
+    "debounce": 3,
+    "cooldown": 120,
+    "value_interval": 10,
+    "log_interval": 10
+  },
+  "safety_rules": {
+    "_note": "着装合规判定：alert_on=哪些状态算违规(UNSAFE 两样都没/ PARTIAL 只戴了一样)；confirm_frames=同一人连续几帧违规才告警；clear_frames=连续几帧合规才解除；track_iou=同一个人前后帧框的匹配门槛；max_miss_frames=人短暂丢失多少帧内不清零连击",
+    "confirm_frames": 5,
+    "clear_frames": 15,
+    "alert_on": ["UNSAFE", "PARTIAL"],
+    "track_iou": 0.3,
+    "max_miss_frames": 30
+  },
+  "detect": {
+    "_note": "一级(找人)阈值 conf_person/iou_person；二级(安全帽/安全衣)阈值 conf_gear/iou_gear；crop_pad=人体框外扩比例；max_persons=每帧最多对几个最大的人跑二级(限制耗时)；min_person_area=人体框面积占整幅画面的下限(滤远处噪点)；min_gear_conf=二级框最低分数",
+    "conf_person": 0.35,
+    "iou_person": 0.45,
+    "conf_gear": 0.25,
+    "iou_gear": 0.45,
+    "crop_pad": 0.08,
+    "max_persons": 5,
+    "min_person_area": 0.0025,
+    "min_gear_conf": 0.0,
+    "_force_status": "演示用：填 SAFE / PARTIAL / UNSAFE 可把所有人框强制成该状态（留空 = 正常判定）；命令行 --force-status 同效",
+    "force_status": ""
+  },
+  "model": {
+    "_note": "一级 person_rknn=yolov8n_headcut.rknn (COCO 80类，只用 class 0=person)；二级 gear_rknn=yolov8n_safe_headcut_i8.rknn (3类：No Vest/person_with_helmet/person_with_vest)。模型名不带路径时按 models/ 查找。",
+    "person_rknn": "yolov8n_headcut.rknn",
+    "person_img_size": 640,
+    "person_nc": 80,
+    "person_class": 0,
+    "gear_rknn": "yolov8n_safe_headcut_i8.rknn",
+    "gear_img_size": 640,
+    "gear_nc": 3
+  },
+  "runtime": {
+    "_note": "运行参数：source=视频源(0=USB 摄像头编号 / rtsp:// / 视频文件路径，按实际填写)；stream=MJPEG 实时预览端口(8090，填 0 关闭)；alertdir=告警截图录像目录(相对包根)；fps=估算帧率；core=NPU核心(AUTO/0/1/2)；stream_width/stream_quality=预览尺寸与画质；keep_alive_no_camera=无摄像头时是否常驻(占位画面)",
+    "source": "0",
+    "fps": 20.0,
+    "alertdir": "alerts",
+    "stream": 8090,
+    "camera_nodes": ["/dev/video", "/dev/safecam"],
+    "stream_width": 480,
+    "stream_quality": 60,
+    "keep_alive_no_camera": true,
+    "core": "AUTO"
+  },
+  "_preprocess_note": "输入预处理：auto=RGA硬件缩放优先，失败自动退回 OpenCV；rga=强制 RGA；cv2=纯 OpenCV",
+  "preprocess": "auto"
+}

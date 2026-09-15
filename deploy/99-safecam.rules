@@ -1,0 +1,2 @@
+
+ACTION=="add", SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", ENV{ID_USB_DRIVER}=="uvcvideo", ENV{ID_V4L_CAPABILITIES}=="*capture*", SYMLINK+="safecam", TAG+="systemd", ENV{SYSTEMD_WANTS}+="safe-detect.service"

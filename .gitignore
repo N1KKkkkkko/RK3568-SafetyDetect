@@ -1,0 +1,53 @@
+# 运行产物（告警截图/录像，含现场画面，且会不断增长）
+alerts/*
+!alerts/.gitkeep
+
+# 本机运维 / 开发笔记（不上传）
+docs/
+
+
+# 模型部署介绍
+models/模型部署介绍.md
+
+# 开发工具（个人自检/打包脚本，本地保留，不上传）
+tools/
+
+# config（真实部署值，不进仓库；公开模板是 safe_config_git.json）
+config/safe_config.json
+config/safe_config.recall.json
+
+# 注释类产物
+deploy/99-safecam_withComment.rules
+
+#app无用物
+app/rga_accel.py
+
+#视频
+test_720p.mp4
+test.mp4
+
+# 构建产物 / 临时文件
+*.tar.gz
+*.zip
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.pyc
+__pycache__/
+*.pyo
+*.bak
+*.bak_*
+*.orig
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 私有配置（把本机 IP / broker 账号填这里，不要提交）
+*.local.json
+config/*.private.json

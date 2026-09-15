@@ -1,0 +1,14 @@
+# 注意：下面的绝对路径是示例，按你的实际部署目录改；跑 deploy/install_notify_stack.sh 会自动用你的 PROJECT_DIR 生成正确的单元。
+[Unit]
+Description=SafeDetect MQ-2 smoke sensor MQTT publisher
+After=network.target mosquitto.service
+[Service]
+Type=simple
+User=firefly
+Group=firefly
+WorkingDirectory=/home/firefly/rk3568_camera/SafeDetect_V0.01
+ExecStart=/usr/bin/python3 -u /home/firefly/rk3568_camera/SafeDetect_V0.01/app/smoke_sensor.py --config /home/firefly/rk3568_camera/SafeDetect_V0.01/config/safe_config.json
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

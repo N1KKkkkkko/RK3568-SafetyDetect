@@ -1,0 +1,8 @@
+# Python 依赖
+numpy>=1.19,<2
+opencv-python-headless>=4.5
+paho-mqtt>=1.6
+
+# apt 依赖 gpiod,v4l-utils,ffmpeg,mosquitto,mosquitto-clients,nodejs
+# tailscale 需从官方源安装
+# npm 依赖 node-red
