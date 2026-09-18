@@ -115,15 +115,20 @@ systemd 单元与 Node-RED 流程文件都在 `deploy/` 下。
 
 ## 🔗 相关链接
 
-- [RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2)
-- [Firefly Wiki](https://wiki.t-firefly.com/zh_CN/ROC-RK3568-PC/started.html)
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-- [Tailscale](https://tailscale.com/)（内网穿透）
-- [ntfy](https://ntfy.sh/)（手机推送）
+- [RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2) —— 模型转换工具包
+- [Firefly Wiki](https://wiki.t-firefly.com/zh_CN/ROC-RK3568-PC/started.html) —— 开发板相关文档
+- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) —— YOLO 系列模型开发
+- [Tailscale](https://tailscale.com/) —— 内网穿透
+- [ntfy](https://ntfy.sh/) —— 手机推送
 
 ---
 
-一级模型:Ultralytics YOLOv8n（COCO 预训练）； 
-二级模型的数据集与初始权重来自开源项目:Safety-Vest-and-Helmet-Detection。本仓库负责板端部署与工程实现。  
+## 🧠 模型说明
 
+本项目采用两级检测架构，仅供学习与交流，非商业用途：
+
+- **一级模型**：基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)（COCO 预训练权重）。
+- **二级模型**：基模来自开源项目 [Safety-Vest-and-Helmet-Detection](https://github.com/ADiTyaRaj8969/Safety-Vest-and-Helmet-Detection)。
+
+---
 联系邮箱：1995466@qq.com
