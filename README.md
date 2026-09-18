@@ -121,11 +121,14 @@ systemd 单元与 Node-RED 流程文件都在 `deploy/` 下。
 - [Tailscale](https://tailscale.com/) —— 内网穿透
 - [ntfy](https://ntfy.sh/) —— 手机推送
 
+## 实物图
+<img width="1280" height="1068" alt="789e71524f091cfd9da9321d0ee1e9c4_720" src="https://github.com/user-attachments/assets/9af024b3-c68e-48ed-8cd2-d6eded7a3c2c" />
+
 ---
 
 ## 🧠 模型说明
 
-本项目采用两级检测架构，仅供学习与交流，非商业用途：
+本项目采用两级检测架构，仅供学习与交流，非商业用途，使用的第三方模型遵循其原始许可证。
 
 - **一级模型**：基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)（COCO 预训练权重）。
 - **二级模型**：基模来自开源项目 [Safety-Vest-and-Helmet-Detection](https://github.com/ADiTyaRaj8969/Safety-Vest-and-Helmet-Detection)。
