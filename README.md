@@ -30,7 +30,7 @@
 
 - **硬件**：Firefly ROC-RK3568-PC（设备树标识 `RK3568-ROC-PC HDMI`；4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头
 - **系统**：Ubuntu 20.04.6 LTS / Python 3.8.10 / 内核 4.19.232
-- **NPU**：驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 2.3.2（镜像预装）
+- **NPU**：驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 1.3.0
 - **已预装 Python 库**：numpy 1.24.4、OpenCV 5.0.0.93、paho-mqtt 2.1.0
 
 > 板端根文件系统是 overlayroot（底层 `/root-ro` 只读 2.5G + 可写层在 `/userdata` 26G），
@@ -129,6 +129,8 @@ systemd 单元与 Node-RED 流程文件都在 `deploy/` 下。
 - **二级模型**：基模来自开源项目 [Safety-Vest-and-Helmet-Detection](https://github.com/ADiTyaRaj8969/Safety-Vest-and-Helmet-Detection)。
 
 ---
+
+## 演示视频链接：https://b23.tv/N3P0mBH
 
 ## 实物图
 <img width="1280" height="1068" alt="789e71524f091cfd9da9321d0ee1e9c4_720" src="https://github.com/user-attachments/assets/9af024b3-c68e-48ed-8cd2-d6eded7a3c2c" />
