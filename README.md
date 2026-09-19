@@ -1,6 +1,11 @@
 # 工地安全着装检测边缘AI终端 (RK3568)
 
 基于 RK3568 的边缘 AI 安全监测系统，支持安全帽/反光安全衣检测与烟雾报警，全程本地推理，不上云保证隐私安全。
+## 推理演示
+### 原视频
+<img width="360" height="197" alt="原视频" src="https://github.com/user-attachments/assets/e04823ec-9f39-46be-b48a-c2153423cfef" />
+### 推理视频
+<img width="360" height="197" alt="识别" src="https://github.com/user-attachments/assets/ce409e14-b780-4fee-842e-d59c1dff40a2" />
 
 ## ✨ 功能特性
 
