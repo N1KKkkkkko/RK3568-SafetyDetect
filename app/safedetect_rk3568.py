@@ -511,7 +511,7 @@ def main():
                         help="视频模式：把标注后的画面另存为视频（如 out.mp4），便于回放评估")
     parser.add_argument("--out", default="result_safe.jpg", help="图片模式输出路径")
     parser.add_argument("--dir", default=None,
-                        help="批量目录模式：处理目录下所有 jpg，逐张出图 + 写 CSV 报告")
+                        help="批量目录模式：处理目录下所有 jpg/jpeg/png，逐张出图 + 写 CSV 报告")
     parser.add_argument("--out-dir", default=None,
                         help="批量模式输出目录（默认 <alertdir>/batch_out）")
     parser.add_argument("--source", default=None,

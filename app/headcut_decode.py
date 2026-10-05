@@ -241,13 +241,13 @@ def match_gear_to_persons(pboxes, pscores, gboxes, gscores, gclasses,
     """把每个帽/衣框分配给"重合率最高、且达到阈值"的那个人，输出三态结论。
 
     返回的每个人是一个 dict：
-      box / score / status / helmet_conf / vest_conf / no_vest_conf / n_boxes
+      box / score / status / helmet_conf / vest_conf / n_boxes
     另外带 helmet_box / vest_box（命中的装备框，便于画图/排查），没有则为 None。
     """
     persons = []
     for b, s in zip(pboxes, pscores):
         persons.append({"box": [float(v) for v in b], "score": float(s),
-                        "helmet_conf": 0.0, "vest_conf": 0.0, "no_vest_conf": 0.0,
+                        "helmet_conf": 0.0, "vest_conf": 0.0,
                         "helmet_box": None, "vest_box": None, "n_boxes": 0})
 
     for gb, gs, gc in zip(gboxes, gscores, gclasses):

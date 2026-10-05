@@ -157,7 +157,6 @@ class Notifier:
                 "score": round(float(p.get("score", 0.0)), 3),
                 "helmet_conf": round(float(p.get("helmet_conf", 0.0)), 3),
                 "vest_conf": round(float(p.get("vest_conf", 0.0)), 3),
-                "no_vest_conf": round(float(p.get("no_vest_conf", 0.0)), 3),
             })
 
         cfg_alert_on = (self.cfg.get("safety_rules") or {}).get("alert_on")
