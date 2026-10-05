@@ -510,6 +510,11 @@ def run_single_stage(frame, ppe_net, preproc, cfg):
     t1 = time.time()
     outs = ppe_net.inference(inputs=[rgb[None, ...]])
     t2 = time.time()
+    # 推理被中断时（例如 Ctrl+C 正好落在 NPU 调用里）rknnlite 会吞掉异常并返回 None，
+    # 直接往后索引会 TypeError 把进程打崩，这里跳过这一帧。
+    if not outs or len(outs) < 2 or outs[0] is None or outs[1] is None:
+        return [], {"pre": (t1 - t0) * 1000, "infer": (t2 - t1) * 1000,
+                    "decode": 0.0, "total": (t2 - t0) * 1000}
     persons = analyze_frame(
         outs, ratio, pad, frame.shape[:2],
         conf_person=float(dc["conf_person"]), conf_gear=float(dc["conf_gear"]),

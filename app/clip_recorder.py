@@ -76,7 +76,9 @@ class ClipRecorder:
         # 编码器/容器要配对，按"普遍能播"的优先级挑：
         #   avc1+mp4(H.264) -> MJPG+avi -> mp4v+mp4 -> XVID+avi
         # 不要把 MJPG 塞进 mp4 容器：OpenCV 会静默改成 mp4v，很多播放器打不开。
-        candidates = [(base + ".mp4", "avc1"), (base + ".avi", "MJPG"),
+        # 先写 AVI/MJPG：各板 OpenCV 都能写，也不会像 avc1 那样在 RK 上触发
+        # h264_v4l2m2m 打开失败的报错；停录后 _convert_mp4() 再转成 H.264。
+        candidates = [(base + ".avi", "MJPG"), (base + ".mp4", "avc1"),
                       (base + ".mp4", "mp4v"), (base + ".avi", "XVID")]
         writer = None
         for fname, cc in candidates:
