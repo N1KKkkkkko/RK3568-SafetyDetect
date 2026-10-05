@@ -10,7 +10,9 @@ docs/
 models/模型部署介绍.md
 
 # 开发工具（个人自检/打包脚本，本地保留，不上传）
-tools/
+tools/*
+# 例外：一阶段 PC 端自检工具与推理链强相关（README/文档会引用），随代码版本化
+!tools/pc_onnx_check.py
 
 # config（真实部署值，不进仓库；公开模板是 safe_config_git.json）
 config/safe_config.json

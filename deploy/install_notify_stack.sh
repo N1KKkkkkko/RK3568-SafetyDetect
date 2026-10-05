@@ -142,14 +142,14 @@ fi
 echo "== [6/6] app units (not enabled by default) =="
 cat > /etc/systemd/system/safe-detect.service <<EOF
 [Unit]
-Description=SafeDetect helmet/vest two-stage detection
+Description=SafeDetect one-stage helmet/vest detection
 After=network.target mosquitto.service
 [Service]
 Type=simple
 User=firefly
 Group=firefly
 WorkingDirectory=${PROJECT_DIR}
-ExecStart=/usr/bin/python3 -u ${PROJECT_DIR}/app/safedetect_two_stage_rk3568.py --config ${PROJECT_DIR}/config/safe_config.json --source ${CAMERA_DEV} --noshow --alertdir ${PROJECT_DIR}/alerts --stream 8090
+ExecStart=/usr/bin/python3 -u ${PROJECT_DIR}/app/safedetect_rk3568.py --config ${PROJECT_DIR}/config/safe_config.json --source ${CAMERA_DEV} --noshow --alertdir ${PROJECT_DIR}/alerts --stream 8090
 Restart=on-failure
 RestartSec=5
 SuccessExitStatus=3

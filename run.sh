@@ -7,7 +7,7 @@
 #   ./run.sh --img test.jpg --out out.jpg      # 单张图调试
 #
 # 等价于：
-#   python3 app/safedetect_two_stage_rk3568.py --config config/safe_config.json "$@"
+#   python3 app/safedetect_rk3568.py --config config/safe_config.json "$@"
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -16,4 +16,4 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG="$DIR/config/safe_config.json"
 [ -f "$CFG" ] || CFG="$DIR/config/safe_config_git.json"
 
-exec python3 "$DIR/app/safedetect_two_stage_rk3568.py" --config "$CFG" "$@"
+exec python3 "$DIR/app/safedetect_rk3568.py" --config "$CFG" "$@"

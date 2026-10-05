@@ -1,44 +1,32 @@
 # -*- coding: utf-8 -*-
-"""headcut YOLOv8 RKNN 解码（本包两级模型共用）。
+"""headcut YOLOv8 RKNN 解码 + PPE 合规判定。
 
-两个模型的输出结构完全一样，只是类别数 nc 不同：
-  一级  yolov8n_headcut.rknn         nc=80 (COCO)  只取 class 0 = person 找人体框
-  二级  yolov8n_safe_headcut_i8.rknn nc=3          安全帽 / 安全衣判定
-
-headcut 砍掉了 rknn-toolkit2 1.3.0 编不了的 DFL/dist2bbox 尾巴，板端 Python 补：
+所有模型的输出结构一样（headcut 砍掉了 rknn-toolkit2 1.3.0 编不了的 DFL/dist2bbox
+尾巴，板端 Python 补回）：
   outputs[0] box DFL logits  (1, 64, anchors)   4 边 x 16 bins
   outputs[1] class scores    (1, nc, anchors)   已过 sigmoid
 
-二级类别（SafeDetect_Model_trans/labels.txt）：
-  0 No Vest             未穿安全衣
-  1 person_with_helmet  人+安全帽
-  2 person_with_vest    人+安全衣
-
-三态判定（与原项目 README / rknn_two_stage_test.py 一致）：
-  同时命中 1 和 2 -> SAFE；只命中其一 -> PARTIAL；都没命中 -> UNSAFE。
+本包用【一阶段】模型 own_best（nc=4）：
+  0 person / 1 helmet / 2 no_helmet / 3 vest
+一次推理同时出人框和帽/衣框，再用"重合率"把人框和帽/衣框关联起来判定：
+  同时匹配到 helmet 和 vest -> SAFE
+  只匹配到其中一个        -> PARTIAL
+  都没匹配到              -> UNSAFE
+**no_helmet 不参与判定**（按需求忽略；没戴帽的人靠"匹配不到 helmet"判出来）。
 """
 import cv2
 import numpy as np
-
-# ---- 二级模型类别 ----
-GEAR_CLASS_NO_VEST = 0
-GEAR_CLASS_HELMET = 1
-GEAR_CLASS_VEST = 2
-GEAR_NC = 3
 
 STATUS_SAFE = "SAFE"
 STATUS_PARTIAL = "PARTIAL"
 STATUS_UNSAFE = "UNSAFE"
 
-# 状态 -> BGR 颜色（与原项目 README 配色一致：绿 / 黄 / 红）
+# 状态 -> BGR 颜色（绿 / 黄 / 红）
 STATUS_COLOR = {
     STATUS_SAFE: (0, 255, 0),
     STATUS_PARTIAL: (0, 255, 255),
     STATUS_UNSAFE: (0, 0, 255),
 }
-
-PERSON_NC = 80        # COCO
-PERSON_CLASS_ID = 0   # COCO class 0 = person
 
 _GRID_CACHE = {}
 _DFL_W = np.arange(16, dtype=np.float32)
@@ -136,47 +124,6 @@ def nms_per_class(boxes, scores, classes, iou_thres=0.45, max_candidates=300):
     sel = np.nonzero(keep)[0]
     return boxes[sel].copy(), scores[sel].copy(), classes[sel].copy()
 
-def decode(outputs, conf=0.25, iou=0.45, img_size=640, nc=3, classes=None):
-    """解码 headcut 输出，返回 (boxes[N,4] xyxy 像素, scores[N], classes[N])。
-
-    classes: 只保留这些类别 id（如一级只取 [0] = person）；None 表示全部保留。
-    优化：先用已有的 sigmoid 分数按 conf 过滤，只对高分锚点做 DFL 软max
-    （全量 8400 锚点软max 在板端是毫秒级开销大头）。
-    """
-    scores = np.asarray(outputs[1], dtype=np.float32).reshape(nc, -1).T
-    cls = scores.argmax(axis=1)
-    sc = scores.max(axis=1)
-    keep = sc >= conf
-    if classes is not None:
-        keep &= np.isin(cls, np.asarray(classes))
-    idx = np.nonzero(keep)[0]
-    if len(idx) == 0:
-        return np.empty((0, 4)), np.empty(0), np.empty(0, dtype=np.int32)
-
-    ax, ay, st = grid_arrays(img_size)
-    prior = np.asarray(outputs[0], dtype=np.float32).reshape(4, 16, -1)[:, :, idx]
-    e = np.exp(prior - prior.max(axis=1, keepdims=True))
-    s = e / e.sum(axis=1, keepdims=True)
-    l, t, r, b = np.tensordot(s, _DFL_W, axes=([1], [0]))
-    cx = (ax[idx] + 0.5 + (r - l) / 2) * st[idx]
-    cy = (ay[idx] + 0.5 + (b - t) / 2) * st[idx]
-    bw = (l + r) * st[idx]
-    bh = (t + b) * st[idx]
-    xyxy = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
-    return nms_per_class(xyxy, sc[idx], cls[idx], iou)
-
-
-def decode_persons(outputs, conf=0.35, iou=0.45, img_size=640,
-                   nc=PERSON_NC, person_class=PERSON_CLASS_ID):
-    """一级模型：只取 person 类的框，返回 (boxes[N,4] xyxy, scores[N])。"""
-    return decode(outputs, conf, iou, img_size, nc, classes=[person_class])
-
-
-def decode_gear(outputs, conf=0.25, iou=0.45, img_size=640, nc=GEAR_NC):
-    """二级模型：安全帽/安全衣框，返回 (boxes, scores, classes)。"""
-    return decode(outputs, conf, iou, img_size, nc, classes=None)
-
-
 def filter_person_boxes(boxes, scores, frame_shape=None, min_area=0.0025,
                         max_persons=0, min_side=16):
     """人体框过滤 + 排序：丢掉过小/贴边的框，按面积从大到小排序。
@@ -203,62 +150,9 @@ def filter_person_boxes(boxes, scores, frame_shape=None, min_area=0.0025,
     return boxes[order], scores[order]
 
 
-def crop_person(frame, box, pad_ratio=0.08):
-    """按比例外扩裁剪人体，返回 (crop, (x1, y1))；裁剪失败返回 (None, None)。"""
-    h0, w0 = frame.shape[:2]
-    x1, y1, x2, y2 = [int(round(v)) for v in box]
-    pw = max(4, int((x2 - x1) * pad_ratio))
-    ph = max(4, int((y2 - y1) * pad_ratio))
-    cx1 = max(0, x1 - pw); cy1 = max(0, y1 - ph)
-    cx2 = min(w0, x2 + pw); cy2 = min(h0, y2 + ph)
-    if cx2 - cx1 < 8 or cy2 - cy1 < 8:
-        return None, None
-    return frame[cy1:cy2, cx1:cx2], (cx1, cy1)
-
-
 # ---------------- 三态判定 / 画图 ----------------
-def gear_status(boxes, scores, classes, min_conf=0.0):
-    """把一个人体裁剪里的二级框聚合成三态结论。
-
-    返回 dict: status / helmet_conf / vest_conf / no_vest_conf / n_boxes
-    """
-    helmet = 0.0
-    vest = 0.0
-    no_vest = 0.0
-    n = 0
-    for i in range(len(scores)):
-        s = float(scores[i])
-        if s < min_conf:
-            continue
-        n += 1
-        c = int(classes[i])
-        if c == GEAR_CLASS_HELMET:
-            helmet = max(helmet, s)
-        elif c == GEAR_CLASS_VEST:
-            vest = max(vest, s)
-        elif c == GEAR_CLASS_NO_VEST:
-            no_vest = max(no_vest, s)
-
-    if helmet > 0.0 and vest > 0.0:
-        status = STATUS_SAFE
-    elif helmet > 0.0 or vest > 0.0:
-        status = STATUS_PARTIAL
-    else:
-        status = STATUS_UNSAFE
-    return {"status": status, "helmet_conf": helmet, "vest_conf": vest,
-            "no_vest_conf": no_vest, "n_boxes": n}
-
-
 def status_color(status):
     return STATUS_COLOR.get(status, (200, 200, 200))
-
-
-def draw_person(img, box, status, score=0.0, thickness=2):
-    """一级人体框（灰）——用于确认"人找到了"，二级再按状态着色覆盖。"""
-    x1, y1, x2, y2 = [int(v) for v in box]
-    cv2.rectangle(img, (x1, y1), (x2, y2), (160, 160, 160), thickness)
-    cv2.putText(img, "person %.2f" % score, (x1, max(y1 - 8, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
 
 
 def draw_gear(img, box, status, helmet_conf=0.0, vest_conf=0.0, track_id=None,
@@ -274,3 +168,155 @@ def draw_gear(img, box, status, helmet_conf=0.0, vest_conf=0.0, track_id=None,
     cv2.rectangle(img, (x1, ty - th - 6), (x1 + tw + 8, ty), color, -1)
     cv2.putText(img, label, (x1 + 4, ty - 4),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+
+
+# ======================================================================
+# 一阶段模型 own_best（nc=4）专用：一次推理出人 + 帽 + 衣，重合率关联
+# ======================================================================
+OWN_NC = 4
+OWN_CLASS_PERSON = 0
+OWN_CLASS_HELMET = 1
+OWN_CLASS_NO_HELMET = 2   # 按需求忽略，不参与判定
+OWN_CLASS_VEST = 3
+
+# 参与判定的类别（no_helmet 明确排除）
+OWN_USE_CLASSES = (OWN_CLASS_PERSON, OWN_CLASS_HELMET, OWN_CLASS_VEST)
+
+
+def decode_det(outputs, conf=0.25, iou=0.45, img_size=640, nc=OWN_NC,
+               classes=None):
+    """在给定类别子集内做 argmax 解码（返回 boxes xyxy 模型尺度, scores, classes）。
+
+    先截取 classes 指定的列再做 argmax：这样排除 no_helmet 之后，
+    一个既有 helmet 分、又有 no_helmet 分的锚点仍会按 helmet 参与判定，
+    而不是被 no_helmet 抢占后丢掉。
+    """
+    scores = np.asarray(outputs[1], dtype=np.float32).reshape(nc, -1).T
+    if classes is not None:
+        sub_idx = np.asarray(classes, dtype=np.int64)
+        sub = scores[:, sub_idx]
+        cls = sub_idx[sub.argmax(axis=1)]
+        sc = sub.max(axis=1)
+    else:
+        cls = scores.argmax(axis=1)
+        sc = scores.max(axis=1)
+
+    keep = sc >= conf
+    idx = np.nonzero(keep)[0]
+    if len(idx) == 0:
+        return (np.empty((0, 4), dtype=np.float32), np.empty(0, dtype=np.float32),
+                np.empty(0, dtype=np.int32))
+
+    ax, ay, st = grid_arrays(img_size)
+    prior = np.asarray(outputs[0], dtype=np.float32).reshape(4, 16, -1)[:, :, idx]
+    e = np.exp(prior - prior.max(axis=1, keepdims=True))
+    s = e / e.sum(axis=1, keepdims=True)
+    l, t, r, b = np.tensordot(s, _DFL_W, axes=([1], [0]))
+    cx = (ax[idx] + 0.5 + (r - l) / 2) * st[idx]
+    cy = (ay[idx] + 0.5 + (b - t) / 2) * st[idx]
+    bw = (l + r) * st[idx]
+    bh = (t + b) * st[idx]
+    xyxy = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
+    return nms_per_class(xyxy, sc[idx], cls[idx], iou)
+
+
+def containment_ratio(inner, outer):
+    """重合率 = inner 框落在 outer 框内的面积 / inner 框面积。
+
+    人框和帽子/衣服框大小悬殊，用 IoU 会趋近于 0（大框包小框时 IoU≈小/大），
+    所以这里用"小框被大框盖住的比例"来判"这件装备是不是属于这个人"。
+    """
+    ix1 = max(float(inner[0]), float(outer[0]))
+    iy1 = max(float(inner[1]), float(outer[1]))
+    ix2 = min(float(inner[2]), float(outer[2]))
+    iy2 = min(float(inner[3]), float(outer[3]))
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    area = max(0.0, float(inner[2]) - float(inner[0])) * \
+        max(0.0, float(inner[3]) - float(inner[1]))
+    return inter / (area + 1e-9)
+
+
+def match_gear_to_persons(pboxes, pscores, gboxes, gscores, gclasses,
+                          overlap_thr=0.5):
+    """把每个帽/衣框分配给"重合率最高、且达到阈值"的那个人，输出三态结论。
+
+    返回的每个人是一个 dict：
+      box / score / status / helmet_conf / vest_conf / no_vest_conf / n_boxes
+    另外带 helmet_box / vest_box（命中的装备框，便于画图/排查），没有则为 None。
+    """
+    persons = []
+    for b, s in zip(pboxes, pscores):
+        persons.append({"box": [float(v) for v in b], "score": float(s),
+                        "helmet_conf": 0.0, "vest_conf": 0.0, "no_vest_conf": 0.0,
+                        "helmet_box": None, "vest_box": None, "n_boxes": 0})
+
+    for gb, gs, gc in zip(gboxes, gscores, gclasses):
+        best_i, best_r = -1, 0.0
+        for i, p in enumerate(persons):
+            r = containment_ratio(gb, p["box"])
+            if r > best_r:
+                best_r, best_i = r, i
+        if best_i < 0 or best_r < overlap_thr:
+            continue                      # 不属于任何人（或与所有框重合太低）的装备框丢弃
+        p = persons[best_i]
+        p["n_boxes"] += 1
+        if int(gc) == OWN_CLASS_HELMET and float(gs) > p["helmet_conf"]:
+            p["helmet_conf"] = float(gs)
+            p["helmet_box"] = [float(v) for v in gb]
+        elif int(gc) == OWN_CLASS_VEST and float(gs) > p["vest_conf"]:
+            p["vest_conf"] = float(gs)
+            p["vest_box"] = [float(v) for v in gb]
+
+    for p in persons:
+        if p["helmet_conf"] > 0.0 and p["vest_conf"] > 0.0:
+            p["status"] = STATUS_SAFE
+        elif p["helmet_conf"] > 0.0 or p["vest_conf"] > 0.0:
+            p["status"] = STATUS_PARTIAL
+        else:
+            p["status"] = STATUS_UNSAFE
+    return persons
+
+
+def analyze_frame(outputs, ratio, pad, frame_shape,
+                  conf_person=0.35, conf_gear=0.25, iou=0.45, img_size=640,
+                  nc=OWN_NC, overlap_thr=0.5, min_person_area=0.0025,
+                  max_persons=0, min_side=16):
+    """一阶段完整后处理：解码 -> 坐标还原 -> 人框过滤 -> 重合率关联 -> 三态。
+
+    这是板端主程序和 PC 端 tools/pc_onnx_check.py 共用的同一份逻辑，
+    保证"PC 上调好的阈值能原样搬到板子"。
+    返回 persons 列表（box 已还原到原图坐标）。
+    """
+    boxes, scores, cls = decode_det(outputs, conf=min(conf_person, conf_gear),
+                                    iou=iou, img_size=img_size, nc=nc,
+                                    classes=list(OWN_USE_CLASSES))
+    cls = cls.astype(np.int32)
+    m_person = cls == OWN_CLASS_PERSON
+    m_gear = (cls == OWN_CLASS_HELMET) | (cls == OWN_CLASS_VEST)
+    psel = m_person & (scores >= conf_person)
+    gsel = m_gear & (scores >= conf_gear)
+
+    pboxes = scale_coords(boxes[psel], ratio, pad, frame_shape)
+    pscores = scores[psel]
+    gboxes = scale_coords(boxes[gsel], ratio, pad, frame_shape)
+    gscores = scores[gsel]
+    gclasses = cls[gsel]
+
+    pboxes, pscores = filter_person_boxes(pboxes, pscores, frame_shape,
+                                          min_area=min_person_area,
+                                          max_persons=max_persons,
+                                          min_side=min_side)
+    return match_gear_to_persons(pboxes, pscores, gboxes, gscores, gclasses,
+                                 overlap_thr)
+
+
+def draw_gear_boxes(img, person, thickness=1):
+    """画命中的装备框：安全帽青色、反光衣品红（只用于排查，不影响判定）。"""
+    hb = person.get("helmet_box")
+    vb = person.get("vest_box")
+    if hb:
+        cv2.rectangle(img, (int(hb[0]), int(hb[1])), (int(hb[2]), int(hb[3])),
+                      (255, 200, 0), thickness)
+    if vb:
+        cv2.rectangle(img, (int(vb[0]), int(vb[1])), (int(vb[2]), int(vb[3])),
+                      (255, 0, 255), thickness)

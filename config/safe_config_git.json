@@ -70,27 +70,25 @@
     "max_miss_frames": 30
   },
   "detect": {
-    "_note": "一级(找人)阈值 conf_person/iou_person；二级(安全帽/安全衣)阈值 conf_gear/iou_gear；crop_pad=人体框外扩比例；max_persons=每帧最多对几个最大的人跑二级(限制耗时)；min_person_area=人体框面积占整幅画面的下限(滤远处噪点)；min_gear_conf=二级框最低分数",
+    "_note": "一阶段：conf_person=人框阈值；conf_gear=安全帽/反光衣框阈值；iou=NMS；gear_overlap=帽/衣框落在人框内的重合率下限(0~1，是重合率不是IoU)；max_persons=每帧最多输出几个最大的人(0=不限)；min_person_area=人框面积占整幅画面的下限(滤远处噪点)",
     "conf_person": 0.35,
-    "iou_person": 0.45,
     "conf_gear": 0.25,
-    "iou_gear": 0.45,
-    "crop_pad": 0.08,
-    "max_persons": 5,
+    "iou": 0.45,
+    "gear_overlap": 0.5,
+    "max_persons": 0,
     "min_person_area": 0.0025,
-    "min_gear_conf": 0.0,
     "_force_status": "演示用：填 SAFE / PARTIAL / UNSAFE 可把所有人框强制成该状态（留空 = 正常判定）；命令行 --force-status 同效",
     "force_status": ""
   },
   "model": {
-    "_note": "一级 person_rknn=yolov8n_headcut.rknn (COCO 80类，只用 class 0=person)；二级 gear_rknn=yolov8n_safe_headcut_i8.rknn (3类：No Vest/person_with_helmet/person_with_vest)。模型名不带路径时按 models/ 查找。",
-    "person_rknn": "yolov8n_headcut.rknn",
-    "person_img_size": 640,
-    "person_nc": 80,
-    "person_class": 0,
-    "gear_rknn": "yolov8n_safe_headcut_i8.rknn",
-    "gear_img_size": 640,
-    "gear_nc": 3
+    "_note": "一阶段 own_best_i8.rknn (4类: 0 person / 1 helmet / 2 no_helmet / 3 vest)。一次推理同时出人+帽+衣，按重合率关联判定；no_helmet 不参与判定。模型名不带路径时按 models/ 查找。",
+    "ppe_rknn": "own_best_i8.rknn",
+    "ppe_img_size": 640,
+    "ppe_nc": 4,
+    "class_person": 0,
+    "class_helmet": 1,
+    "class_no_helmet": 2,
+    "class_vest": 3
   },
   "runtime": {
     "_note": "运行参数：source=视频源(0=USB 摄像头编号 / rtsp:// / 视频文件路径，按实际填写)；stream=MJPEG 实时预览端口(8090，填 0 关闭)；alertdir=告警截图录像目录(相对包根)；fps=估算帧率；core=NPU核心(AUTO/0/1/2)；stream_width/stream_quality=预览尺寸与画质；keep_alive_no_camera=无摄像头时是否常驻(占位画面)",

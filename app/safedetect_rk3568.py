@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RK3568 安全帽/安全衣（PPE）检测入口（板端主程序，两级流水线）。
+RK3568 安全帽/反光衣（PPE）检测入口（板端主程序，一阶段单模型）。
 
 架构总览（数据流）：
-  USB摄像头 
-      1. 主循环：
-             一级：yolov8n_headcut.rknn（COCO 80 类，只取 class0=person）-> 人体框
-             二级：对每个人体裁剪 -> yolov8n_safe_headcut_i8.rknn（3 类）-> SAFE/PARTIAL/UNSAFE
+  USB摄像头
+      1. 主循环：own_best_i8.rknn（4 类 person/helmet/no_helmet/vest）
+         一次推理同时得到人框和帽/衣框 -> 按"重合率"把人框和帽/衣框关联：
+             同时匹配到 helmet + vest -> SAFE
+             只匹配到一个             -> PARTIAL
+             都没匹配到               -> UNSAFE
+         no_helmet 不参与判定（按需求忽略），没戴帽的人靠"匹配不到 helmet"判出来。
       2. 合规状态机 SafetyMonitor（逐人 IoU 跟踪 + 连续帧确认 + 上升沿触发）
       3. 告警（MQTT -> Node-RED -> ntfy 手机推送 / 截图 + 前后录像）
       4. MJPEG 网页预览（stream_server，手机浏览器可远程看画面）
 
-模型：
-  一级 yolov8n_headcut.rknn          
-  二级 yolov8n_safe_headcut_i8.rknn 
+模型（SafeDetect_V0.01/models/）：
+  own_best_i8.rknn     板端一阶段模型（rknn-toolkit2 1.3.0 生成，version 2）
+  own_best_headcut.onnx 同源 ONNX（PC 端 tools/pc_onnx_check.py 自检用）
+  own_best.pt          原始训练权重（参考/重转用）
 
 """
 import argparse
@@ -30,9 +34,9 @@ import numpy as np
 from rknnlite.api import RKNNLite   # 板端 NPU 推理库（Rockchip）
 
 # ---- 本地模块（同目录，职责单一） ----
-from headcut_decode import (letterbox, scale_coords, decode_persons, decode_gear,
-                            gear_status, filter_person_boxes, crop_person,
-                            draw_gear, STATUS_SAFE, STATUS_UNSAFE, STATUS_PARTIAL)
+from headcut_decode import (letterbox, analyze_frame,
+                            draw_gear, draw_gear_boxes,
+                            STATUS_SAFE, STATUS_UNSAFE, STATUS_PARTIAL)
 from safety_rules import SafetyMonitor        # 着装违规状态机
 from stream_server import (start_stream, stream_publish_loop,    # MJPEG 预览(8090)
                             get_lan_ip)
@@ -388,19 +392,6 @@ def preprocess_frame(frame, preproc, img_size):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB), ratio, pad
 
 
-def classify_person(frame, box, gear_net, preproc, gear_img, gear_nc,
-                    conf_gear, iou_gear, min_gear_conf, crop_pad):
-    """二级：裁出这个人 -> letterbox -> 安全帽/安全衣推理 -> 三态结论。"""
-    crop, _offset = crop_person(frame, box, crop_pad)
-    if crop is None:
-        return None
-    rgb, _r, _p = preprocess_frame(crop, preproc, gear_img)
-    outs = gear_net.inference(inputs=[rgb[None, ...]])
-    gb, gs, gc = decode_gear(outs, conf=conf_gear, iou=iou_gear,
-                             img_size=gear_img, nc=gear_nc)
-    return gear_status(gb, gs, gc, min_conf=min_gear_conf)
-
-
 def local_ipv4_list():
     """列出本机可用 IPv4（优先 `hostname -I`），用于打印浏览器/手机能直接打开的地址。"""
     ips = []
@@ -455,48 +446,37 @@ def print_accessible_urls(port, notifier, cfg):
         print("     端口被别的服务占用时，改 config ports.alert_http 后重装即可。")
 
 
-def run_two_stage(frame, person_net, gear_net, preproc, cfg):
-    """对一帧跑完整两级流水线，返回 (persons, timings)。persons 是每人的三态结论。"""
+def run_single_stage(frame, ppe_net, preproc, cfg):
+    """对一帧跑一阶段流水线，返回 (persons, timings)。persons 是每人的三态结论。
+
+    一次推理同时得到人框和帽/衣框，后处理里按重合率关联（见 headcut_decode.analyze_frame）。
+    """
     md = cfg["model"]
     dc = cfg["detect"]
-    person_img = int(md["person_img_size"])
-    gear_img = int(md["gear_img_size"])
+    img_size = int(md["ppe_img_size"])
 
     t0 = time.time()
-    rgb1, ratio1, pad1 = preprocess_frame(frame, preproc, person_img)
+    rgb, ratio, pad = preprocess_frame(frame, preproc, img_size)
     t1 = time.time()
-    outs1 = person_net.inference(inputs=[rgb1[None, ...]])
+    outs = ppe_net.inference(inputs=[rgb[None, ...]])
     t2 = time.time()
-    pboxes, pscores, _pcls = decode_persons(
-        outs1, conf=float(dc["conf_person"]), iou=float(dc["iou_person"]),
-        img_size=person_img, nc=int(md["person_nc"]),
-        person_class=int(md["person_class"]))
-    pboxes = scale_coords(pboxes, ratio1, pad1, frame.shape[:2])
-    pboxes, pscores = filter_person_boxes(
-        pboxes, pscores, frame.shape[:2],
-        min_area=float(dc["min_person_area"]),
-        max_persons=int(dc["max_persons"]))
+    persons = analyze_frame(
+        outs, ratio, pad, frame.shape[:2],
+        conf_person=float(dc["conf_person"]), conf_gear=float(dc["conf_gear"]),
+        iou=float(dc["iou"]), img_size=img_size, nc=int(md["ppe_nc"]),
+        overlap_thr=float(dc.get("gear_overlap", 0.5)),
+        min_person_area=float(dc["min_person_area"]),
+        max_persons=int(dc.get("max_persons") or 0))
     t3 = time.time()
 
     # 演示用：把所有人的判定强制成同一状态（颜色、状态机、告警都跟着走）
     force_status = str(dc.get("force_status") or "").strip().upper()
+    if force_status in ("SAFE", "PARTIAL", "UNSAFE"):
+        for p in persons:
+            p["status"] = force_status
 
-    persons = []
-    for box, score in zip(pboxes, pscores):
-        st = classify_person(frame, box, gear_net, preproc, gear_img,
-                             int(md["gear_nc"]), float(dc["conf_gear"]),
-                             float(dc["iou_gear"]), float(dc["min_gear_conf"]),
-                             float(dc["crop_pad"]))
-        if st is None:
-            continue
-        if force_status in ("SAFE", "PARTIAL", "UNSAFE"):
-            st = dict(st, status=force_status)
-        persons.append({"box": [float(v) for v in box],
-                        "score": float(score), **st})
-    t4 = time.time()
-    timings = {"pre": (t1 - t0) * 1000, "infer1": (t2 - t1) * 1000,
-               "decode1": (t3 - t2) * 1000, "gear": (t4 - t3) * 1000,
-               "total": (t4 - t0) * 1000}
+    timings = {"pre": (t1 - t0) * 1000, "infer": (t2 - t1) * 1000,
+               "decode": (t3 - t2) * 1000, "total": (t3 - t0) * 1000}
     return persons, timings
 
 
@@ -523,11 +503,9 @@ def main():
 
     # ---------- 1) 命令行参数 ----------
     # 与配置相关的参数默认值都是 None：不传 = 用 safe_config.json / 默认值
-    parser = argparse.ArgumentParser(description="RK3568 安全帽/安全衣(PPE)两级检测")
-    parser.add_argument("--person-rknn", default=None,
-                        help="一级人体检测 rknn（默认取 safe_config.json model.person_rknn）")
-    parser.add_argument("--gear-rknn", default=None,
-                        help="二级安全帽/安全衣 rknn（默认取 safe_config.json model.gear_rknn）")
+    parser = argparse.ArgumentParser(description="RK3568 安全帽/反光衣(PPE)一阶段检测")
+    parser.add_argument("--ppe-rknn", default=None,
+                        help="一阶段 4 类 rknn（默认取 safe_config.json model.ppe_rknn）")
     parser.add_argument("--img", default=None, help="单张图片路径（图片模式）")
     parser.add_argument("--out-video", default=None,
                         help="视频模式：把标注后的画面另存为视频（如 out.mp4），便于回放评估")
@@ -539,18 +517,20 @@ def main():
     parser.add_argument("--source", default=None,
                         help="视频源，默认取 safe_config.json runtime.source（0=USB, rtsp://..., 视频文件）")
     parser.add_argument("--conf-person", type=float, default=None,
-                        help="一级人体置信度阈值（默认 detect.conf_person）")
+                        help="人体框置信度阈值（默认 detect.conf_person）")
     parser.add_argument("--conf-gear", type=float, default=None,
-                        help="二级安全帽/安全衣置信度阈值（默认 detect.conf_gear）")
+                        help="安全帽/反光衣框置信度阈值（默认 detect.conf_gear）")
+    parser.add_argument("--gear-overlap", type=float, default=None,
+                        help="帽/衣框落在人体框内的重合率下限（默认 detect.gear_overlap）")
     parser.add_argument("--iou", type=float, default=None,
-                        help="NMS iou 阈值（同时覆盖一级/二级，默认 detect.iou_*）")
+                        help="NMS iou 阈值（默认 detect.iou）")
     parser.add_argument("--force-status", default=None,
                         choices=["SAFE", "PARTIAL", "UNSAFE"],
                         help="演示用：把所有人体框的判定强制为该状态（默认不强制）")
     parser.add_argument("--max-persons", type=int, default=None,
-                        help="每帧最多对几个最大的人跑二级（限制耗时，默认 detect.max_persons）")
+                        help="每帧最多输出几个最大的人（0=不限，默认 detect.max_persons）")
     parser.add_argument("--bench", type=int, default=0,
-                        help="性能基准：跑 N 帧，分阶段计时 pre/infer1/decode1/二级（不接摄像头也可跑）")
+                        help="性能基准：跑 N 帧，分阶段计时 pre/infer/decode（不接摄像头也可跑）")
     parser.add_argument("--bench-img", default=None, help="基准用图片（默认找本目录 bus.jpg）")
     parser.add_argument("--core", default=None, choices=["AUTO", "0", "1", "2"],
                         help="NPU 核心，默认取 config runtime.core")
@@ -593,19 +573,18 @@ def main():
         overrides["camera_id"] = args.camera_id
     if args.ts_ip is not None:
         overrides.setdefault("notify", {})["ts_ip"] = args.ts_ip
-    if args.person_rknn is not None:
-        overrides.setdefault("model", {})["person_rknn"] = args.person_rknn
-    if args.gear_rknn is not None:
-        overrides.setdefault("model", {})["gear_rknn"] = args.gear_rknn
+    if args.ppe_rknn is not None:
+        overrides.setdefault("model", {})["ppe_rknn"] = args.ppe_rknn
     if args.preprocess is not None:
         overrides["preprocess"] = args.preprocess
     if args.conf_person is not None:
         overrides.setdefault("detect", {})["conf_person"] = args.conf_person
     if args.conf_gear is not None:
         overrides.setdefault("detect", {})["conf_gear"] = args.conf_gear
+    if args.gear_overlap is not None:
+        overrides.setdefault("detect", {})["gear_overlap"] = args.gear_overlap
     if args.iou is not None:
-        overrides.setdefault("detect", {})["iou_person"] = args.iou
-        overrides.setdefault("detect", {})["iou_gear"] = args.iou
+        overrides.setdefault("detect", {})["iou"] = args.iou
     if args.force_status is not None:
         overrides.setdefault("detect", {})["force_status"] = args.force_status
     if args.max_persons is not None:
@@ -626,8 +605,7 @@ def main():
     rt = cfg["runtime"]
     global CAMERA_NODES                      # 摄像头节点前缀按配置走（udev 别名换名不用改代码）
     CAMERA_NODES = list(rt.get("camera_nodes") or CAMERA_NODES)
-    person_path = resolve_model(str(md["person_rknn"]))
-    gear_path = resolve_model(str(md["gear_rknn"]))
+    ppe_path = resolve_model(str(md["ppe_rknn"]))
     alertdir = rt["alertdir"]
     if not os.path.isabs(alertdir):          # 相对路径按包根解析，和 systemd 的 WorkingDirectory 解耦
         alertdir = os.path.join(PKG_ROOT, alertdir)
@@ -636,15 +614,14 @@ def main():
     stream_quality = int(rt.get("stream_quality", 60))
     core = rt["core"]
 
-    # ---------- 3) 预处理 + 两个 NPU 模型 ----------
+    # ---------- 3) 预处理 + 一阶段 NPU 模型 ----------
     preproc = RgaAccel(str(cfg["preprocess"]))
     print("预处理:", preproc.info())
-    print("一级(人体)模型:", person_path, "img", md["person_img_size"],
-          "nc", md["person_nc"], "class", md["person_class"])
-    print("二级(安全帽/安全衣)模型:", gear_path, "img", md["gear_img_size"],
-          "nc", md["gear_nc"])
-    person_net = init_rknn(person_path, core_map[core])
-    gear_net = init_rknn(gear_path, core_map[core])
+    print("一阶段模型:", ppe_path, "img", md["ppe_img_size"], "nc", md["ppe_nc"],
+          "(person=%s helmet=%s no_helmet=%s vest=%s, no_helmet 不参与判定)"
+          % (md["class_person"], md["class_helmet"], md["class_no_helmet"],
+             md["class_vest"]))
+    ppe_net = init_rknn(ppe_path, core_map[core])
 
     # ---------------- 性能基准（--bench N） ----------------
     if args.bench:
@@ -661,22 +638,22 @@ def main():
         if bench_img is None:
             bench_img = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
             print("基准: 未找到测试图，使用随机噪声帧（decode 耗时仅参考）")
-        st = {"pre": 0.0, "infer1": 0.0, "decode1": 0.0, "gear": 0.0}
+        st = {"pre": 0.0, "infer": 0.0, "decode": 0.0}
+        persons = []
         for i in range(n + 3):
-            persons, tm = run_two_stage(bench_img, person_net, gear_net, preproc, cfg)
+            persons, tm = run_single_stage(bench_img, ppe_net, preproc, cfg)
             if i >= 3:
                 for k in st:
                     st[k] += tm[k]
-        print("---- 基准（%d 次平均，一级 %d / 二级 %d，每人 %.1f ms）----"
-              % (n, md["person_img_size"], md["gear_img_size"], st["gear"] / max(n, 1)))
+        print("---- 基准（%d 次平均，一阶段 img %d，本帧人框 %d）----"
+              % (n, md["ppe_img_size"], len(persons)))
         tot = 0.0
-        for k in ("pre", "infer1", "decode1", "gear"):
+        for k in ("pre", "infer", "decode"):
             avg = st[k] / n
             tot += avg
             print("  %-8s %8.2f ms" % (k, avg))
         print("  合计 %.2f ms/帧 (约 %.1f FPS)" % (tot, 1000.0 / max(tot, 1e-6)))
-        person_net.release()
-        gear_net.release()
+        ppe_net.release()
         return 0
 
     # ---------- 4) 业务组件：状态机 / MQTT / 录像 / 推流 ----------
@@ -709,21 +686,22 @@ def main():
         if frame is None:
             print("ERROR: 无法读取图片", args.img)
             return 2
-        persons, tm = run_two_stage(frame, person_net, gear_net, preproc, cfg)
+        persons, tm = run_single_stage(frame, ppe_net, preproc, cfg)
         # 单张图自检：确认帧数压到 1，让状态直接反映这张图（序列模式才用连续帧确认）
         single = SafetyMonitor(confirm_frames=1, clear_frames=1,
                                alert_on=tuple(sr.get("alert_on") or (STATUS_UNSAFE,)))
         info = single.update(persons, frame.shape[:2])
         for p in persons:
+            draw_gear_boxes(frame, p)
             draw_gear(frame, p["box"], p["status"], p["helmet_conf"],
                       p["vest_conf"], p.get("track_id"))
         draw_overlay(frame, info, tm["total"])
-        print("耗时 pre %.1f / 一级 %.1f / 解码 %.1f / 二级 %.1f ms，检测到 %d 人"
-              % (tm["pre"], tm["infer1"], tm["decode1"], tm["gear"], len(persons)))
+        print("耗时 pre %.1f / 推理 %.1f / 解码 %.1f ms，检测到 %d 人"
+              % (tm["pre"], tm["infer"], tm["decode"], len(persons)))
         for p in persons:
-            print("  人#%s %s 帽=%.2f 衣=%.2f 无衣=%.2f (二级框%d)"
+            print("  人#%s %s 帽=%.2f 衣=%.2f (装备框%d)"
                   % (p.get("track_id"), p["status"], p["helmet_conf"],
-                     p["vest_conf"], p["no_vest_conf"], p["n_boxes"]))
+                     p["vest_conf"], p["n_boxes"]))
         print("状态: %s" % info["status_text"])
         cv2.imwrite(args.out, frame)
         print("结果已保存:", args.out)
@@ -732,48 +710,49 @@ def main():
             on_unsafe(frame, info, alert_path)
             notifier.on_unsafe(frame, info, alert_path, None, tm["total"],
                                alert_on=cfg["safety_rules"].get("alert_on"))
-        person_net.release()
-        gear_net.release()
+        ppe_net.release()
         return 0
 
-    # ---------- 6) 批量目录模式（--dir，逐张出图 + CSV，和 rknn_two_stage_test.py 对齐） ----------
+    # ---------- 6) 批量目录模式（--dir，逐张出图 + CSV） ----------
     if args.dir:
         out_dir = args.out_dir or os.path.join(alertdir, "batch_out")
         os.makedirs(out_dir, exist_ok=True)
-        images = sorted(str(p) for p in __import__("pathlib").Path(args.dir).glob("*.jpg"))
+        _dir = __import__("pathlib").Path(args.dir)
+        images = sorted(str(p) for e in ("*.jpg", "*.jpeg", "*.png")
+                        for p in _dir.glob(e))
         if not images:
             print("ERROR: 目录里没有 jpg:", args.dir)
             return 2
-        report = os.path.join(out_dir, "safe_two_stage_result.csv")
+        report = os.path.join(out_dir, "safe_one_stage_result.csv")
         with open(report, "w", newline="", encoding="utf-8") as fcsv:
             w = csv.writer(fcsv)
             w.writerow(["image", "person", "x1", "y1", "x2", "y2",
-                        "helmet_conf", "vest_conf", "no_vest_conf", "status"])
+                        "helmet_conf", "vest_conf", "status"])
             for img_path in images:
                 frame = cv2.imread(img_path)
                 if frame is None:
                     print("无法读取", img_path)
                     continue
-                persons, tm = run_two_stage(frame, person_net, gear_net, preproc, cfg)
+                persons, tm = run_single_stage(frame, ppe_net, preproc, cfg)
                 # 批量目录每张图是独立场景：各起一个状态机，人编号从 1 开始，不跨图累计
                 per_img = SafetyMonitor(confirm_frames=1, clear_frames=1,
                                         alert_on=tuple(sr.get("alert_on") or (STATUS_UNSAFE,)))
                 info = per_img.update(persons, frame.shape[:2])
                 for pi, p in enumerate(persons):
                     x1, y1, x2, y2 = [int(v) for v in p["box"]]
+                    draw_gear_boxes(frame, p)
                     draw_gear(frame, p["box"], p["status"], p["helmet_conf"],
                               p["vest_conf"], p.get("track_id"))
                     w.writerow([os.path.basename(img_path), pi, x1, y1, x2, y2,
                                 round(p["helmet_conf"], 4), round(p["vest_conf"], 4),
-                                round(p["no_vest_conf"], 4), p["status"]])
+                                p["status"]])
                 draw_overlay(frame, info, tm["total"])
-                out_img = os.path.join(out_dir, "two_" + os.path.basename(img_path))
+                out_img = os.path.join(out_dir, "one_" + os.path.basename(img_path))
                 cv2.imwrite(out_img, frame)
                 print("%s 人数=%d 状态=%s" % (os.path.basename(img_path),
                                               len(persons), info["status_text"]))
         print("报告:", report)
-        person_net.release()
-        gear_net.release()
+        ppe_net.release()
         return 0
 
     # ---------- 7) 视频模式：采集线程 + 主循环 ----------
@@ -859,10 +838,11 @@ def main():
                 startup_notified = True
                 notifier.publish_status("startup")
 
-            persons, tm = run_two_stage(frame, person_net, gear_net, preproc, cfg)
+            persons, tm = run_single_stage(frame, ppe_net, preproc, cfg)
             info = monitor.update(persons, frame.shape[:2])
 
             for p in persons:
+                draw_gear_boxes(frame, p)
                 draw_gear(frame, p["box"], p["status"], p["helmet_conf"],
                           p["vest_conf"], p.get("track_id"))
             draw_overlay(frame, info, tm["total"])
@@ -896,9 +876,9 @@ def main():
                     out_frames += 1
 
             if frame_id % 10 == 0:
-                print("#%d: %s, pre %.1f/一级 %.1f/解码 %.1f/二级 %.1f ms, %d 人"
-                      % (frame_id, info["status_text"], tm["pre"], tm["infer1"],
-                         tm["decode1"], tm["gear"], len(persons)))
+                print("#%d: %s, pre %.1f/推理 %.1f/解码 %.1f ms, %d 人"
+                      % (frame_id, info["status_text"], tm["pre"], tm["infer"],
+                         tm["decode"], len(persons)))
 
             if args.show:
                 cv2.imshow("safe_detect", frame)
@@ -914,8 +894,7 @@ def main():
         video_to_h264(out_video)
 
     stop_hb.set()
-    person_net.release()
-    gear_net.release()
+    ppe_net.release()
     if args.show:
         cv2.destroyAllWindows()
     if camera_failed.is_set() and not keep_alive:
