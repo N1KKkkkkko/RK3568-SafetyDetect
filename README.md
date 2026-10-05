@@ -1,145 +1,149 @@
-# 工地安全着装检测边缘AI终端 (RK3568)
+# 工地安全着装检测终端（RK3568）
 
-基于 RK3568 的边缘 AI 安全监测系统，支持安全帽/反光安全衣检测与烟雾报警，全程本地推理，不上云保证隐私安全。
-## 推理演示
-原视频:
-<img width="360" height="197" alt="原视频" src="https://github.com/user-attachments/assets/e04823ec-9f39-46be-b48a-c2153423cfef" />  
+当前版本：v2.0.0
 
-推理视频:
-<img width="360" height="197" alt="识别" src="https://github.com/user-attachments/assets/ce409e14-b780-4fee-842e-d59c1dff40a2" />
+跑在 Firefly ROC-RK3568-PC 上的工地着装检测程序：USB 摄像头输入，板端 NPU 推理，判断安全帽和反光衣有没有穿戴齐全，违规时保存截图和前后录像，通过 MQTT 推到手机，同时提供网页实时画面。所有推理、告警截图与视频数据均在本地处理与存储，远程访问通过加密内网通道完成，数据不出厂区，满足工业场景对隐私保护和低延迟的要求。
 
-## ✨ 功能特性
+## 背景
 
-- 🪖 安全帽 / 反光安全衣检测（YOLOv8n + NPU）
-- 🎯 两阶段流水线：先找人，再对每个人单独判断装备
-- 🧍 逐人判定 SAFE / PARTIAL / UNSAFE，画面按状态着色
-- 📈 逐人跟踪 + 连续帧确认，抑制单帧误检
-- 🔥 烟雾报警（MQ-2 传感器，与着装告警同一条通道）
-- 📱 手机告警推送（截图 + 前后录像 + 一键看实时画面）
-- 🖥️ 网页实时画面，手机浏览器直接打开（MJPEG）
-- 🌐 远程访问（可选）：Tailscale 内网穿透，不在同一局域网也能收告警、看画面，不开放公网端口
-- 🛡️ 无摄像头/掉线不退出，显示占位画面并推通知，插回自动恢复
+工地要求作业人员佩戴安全帽、穿反光安全衣，但传统人工巡查效率低、覆盖有限，难以做到全天候、全区域监管。为此，本项目基于 RK3568 设计了一套边缘 AI 安全终端，将目标检测、违规判定、声光告警与远程查看集成在一块低功耗开发板上，支持 7×24 小时无人值守运行。
 
-## 🏗️ 技术架构
+## 功能
 
-摄像头(USB UVC) →预处理(CPU) → RK3568 NPU推理 → 后处理(CPU) → 告警链路 → 手机
+- 安全帽、反光衣检测，逐人给出 SAFE / PARTIAL / UNSAFE，画面按状态着色
+- 逐人跟踪加连续帧确认，单帧误检不会触发告警
+- 违规告警：截图 + 前后视频片段，经 MQTT 发布，手机端用 ntfy 接收
+- 板端 MJPEG 实时画面，手机浏览器直接打开
+- MQ-2 烟雾报警，和着装告警走同一条推送通道
+- 摄像头掉线时服务不退出，显示占位画面，插回后自动恢复检测
+- 远程查看可选：板子和手机都装 Tailscale 后，在外网也能收告警、看画面，不用开公网端口
 
-- 模型：YOLOv8n (人形检测) + YOLOv8n (安全装备，2 类)
-- 部署：RKNN-Toolkit2 1.3.0, librknnrt 1.3.0（模型版本必须与板端运行时同代）
-- 推理：NPU 负责卷积，CPU 负责 DFL 解码 / NMS / 坐标还原
-- 告警：MQTT → Node-RED → ntfy；实时画面走板端 MJPEG
-- 远程访问：Tailscale 虚拟 IP 由板端自动探测，随告警消息下发给 Node-RED；手机与板子登录同一账号即可直连（内网、外网通用）
+## 检测方案
 
-## 📦 快速开始
+用单个 YOLOv8n 模型（4 类：person / helmet / no_helmet / vest）做一次推理，同时得到人框和帽/衣框，再按"装备框落在人框内的重合率"把装备归属到人。
 
-### 环境要求
+### 三态判定
 
-- **硬件**：Firefly ROC-RK3568-PC（设备树标识 `RK3568-ROC-PC HDMI`；4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头
-- **系统**：Ubuntu 20.04.6 LTS / Python 3.8.10 / 内核 4.19.232
-- **NPU**：驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 1.3.0
-- **已预装 Python 库**：numpy 1.24.4、OpenCV 5.0.0.93、paho-mqtt 2.1.0
+- 同时匹配到帽子、反光衣：SAFE
+- 只匹配到其中一样：PARTIAL
+- 都没匹配到：UNSAFE
 
-> 板端根文件系统是 overlayroot（底层 `/root-ro` 只读 2.5G + 可写层在 `/userdata` 26G），
-> `df -h /` 实测剩余约 18G，项目与告警产物写在用户目录即可；截图/录像按 `alerts.max_records`
-> （默认 100 对）自动清理最旧记录。内核较老（4.19）时 RGA 硬件缩放可能慢于 OpenCV，
-> 程序启动会实测后自动选择，无需手动干预。
+no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。重合率用的是装备框面积占比（交集 / 装备框面积），不是 IoU——人框和帽子框尺寸差得多，用 IoU 会趋近于零。
+
+### 单模型与两级方案
+
+早先的版本是两级的：先跑 COCO 人形检测，再对每个人裁剪后跑一个 3 类装备模型。现在只有一次 NPU 推理，不再按人数裁剪，耗时与画面里的人数无关，也没有两级级联带来的误差累积。
+
+### 模型输出格式
+
+模型输出是 headcut 形式。rknn-toolkit2 1.3.0 编译不了 YOLOv8 的 DFL/dist2bbox 尾巴，所以转换时把 sigmoid 之后的原始张量直接当模型输出，DFL 解码、锚点还原和 NMS 放在板端 Python 里做。
+
+## 部署
+
+### 环境
+
+| 项 | 说明 |
+| --- | --- |
+| 硬件 | Firefly ROC-RK3568-PC（4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头 |
+| 系统 | Ubuntu 20.04.6 LTS，Python 3.8.10，内核 4.19.232 |
+| NPU | 驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 2.3.2（镜像预装） |
+| Python | numpy 1.24.4，OpenCV 5.0.0.93，paho-mqtt 2.1.0 |
+
+板端根文件系统是 overlayroot，底层 `/root-ro` 只读，可写层在 `/userdata`。告警截图和录像写在用户目录，按 `alerts.max_records`（默认 100 对）自动清理最旧的记录。内核较老（4.19）时 RGA 硬件缩放可能比 OpenCV 还慢，程序启动时会实测再决定用哪个，不需要手动设置。
 
 ### 安装
 
-```bash
-# 板端镜像通常已装好 Python 依赖，只需确认下面这几个系统命令
-sudo apt install -y gpiod v4l-utils mosquitto mosquitto-clients
-sudo apt install -y ffmpeg            # 可选：告警录像转 H.264
+板端镜像一般已经装好 Python 依赖，先确认这几个系统命令：
 
-# 若换到缺依赖的机器，再补 Python 依赖
+```bash
+sudo apt install -y gpiod v4l-utils mosquitto mosquitto-clients
+sudo apt install -y ffmpeg            # 可选，用来把告警录像转成 H.264
+```
+
+换到缺依赖的机器时再补 Python 部分：
+
+```bash
 pip3 install -r requirements.txt
-sudo apt install -y gpiod mosquitto mosquitto-clients ffmpeg
 ```
 
 ### 配置
 
 ```bash
-cp config/safe_config_git.json config/safe_config.json   # 首次部署：生成私有配置
+cp config/safe_config_git.json config/safe_config.json
 ```
 
-真实部署值都写在 `config/safe_config.json`：本机对外 IP、摄像头节点、传感器 GPIO/ADC 接线与报警阈值、
-MQTT 账号、端口等。它在 `.gitignore` 里，不会上传；`config/safe_config_git.json` 是可上传的公开模板，
-两者字段一致。程序优先读私有配置，没有（例如刚 clone）就自动退回模板，所以不配也能先跑起来。
+实际部署值写在 `config/safe_config.json`：摄像头节点、传感器 GPIO/ADC 接线与报警阈值、MQTT 账号、端口等。这个文件在 `.gitignore` 里，不会上传；`config/safe_config_git.json` 是可以上传的公开模板，字段完全一致。程序优先读私有配置，没有（比如刚 clone 下来）就退回模板，因此不配也能先跑起来。
 
-### 运行
+## 使用
+
+### 常用命令
 
 ```bash
-./run.sh --source /dev/video0 --noshow        # USB 摄像头（节点按实际填）
-./run.sh --img test.jpg --out out.jpg         # 单张图片调试（打印每人置信度）
-./run.sh --dir ~/frames --out-dir ~/out       # 批量图片 + CSV 报告
-./run.sh --source ~/site.mp4                  # 回放视频文件（按原帧率）
+./run.sh --source /dev/video0 --noshow        # USB 摄像头，节点按实际填
+./run.sh --img test.jpg --out out.jpg         # 单张图片调试，打印每个人的置信度
+./run.sh --dir ~/frames --out-dir ~/out       # 批量图片，出图并写 CSV 报告
+./run.sh --source ~/site.mp4                  # 回放视频文件，按原帧率
 ./run.sh --bench 30                           # 分阶段性能测试
 ```
 
-实时画面：`http://<板子IP>:8090/`　手机告警：下载ntfy 订阅主题 `safe_cam1` 服务链接地址 `http://<板子IP>`
+### 实时画面与手机告警
 
-**远程访问（可选）**：同一局域网内直接访问即可，不需要额外组件。要出门也能看时，
-板子和手机都装 [Tailscale](https://tailscale.com/)（登录同一账号）：
+实时画面在 `http://<板子IP>:8090/`。手机告警需要装 ntfy 并订阅主题 `safe_cam1`，服务地址为 `http://<板子IP>`。
+
+告警推送依赖 mosquitto / Node-RED / ntfy，用 `deploy/install_notify_stack.sh` 可以一次装好，systemd 单元和 Node-RED 流程文件都在 `deploy/` 下。
+
+### 远程访问（可选）
+
+同一局域网内直接访问即可，不需要额外组件。要出门也能看时，板子和手机都装 [Tailscale](https://tailscale.com/) 并登录同一账号：
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh   # 板端安装
-sudo tailscale up                                  # 打印授权链接，浏览器登录同账号
-tailscale ip -4                                    # 板子的虚拟 IP，手机用它替换 <板子IP>
+sudo tailscale up                                  # 打印授权链接，用浏览器登录
+tailscale ip -4                                    # 板子的虚拟 IP，手机用它访问
 ```
 
-装好后，实时画面 / 告警截图 / 录像链接都走这个虚拟 IP，公网不用开任何端口。
-没装 Tailscale 程序也照常运行 —— 程序会自动探测可用地址（优先 Tailscale，其次局域网 IP）。
+装好后实时画面、告警截图、录像链接都走这个虚拟 IP，公网不用开端口。没装 Tailscale 也照常运行，程序会自动探测可用地址，优先 Tailscale，其次局域网 IP。
 
-告警推送需要 mosquitto / Node-RED / ntfy，`deploy/install_notify_stack.sh` 可一次装好，
-systemd 单元与 Node-RED 流程文件都在 `deploy/` 下。
+## 性能
 
-## 📊 性能指标
+RK3568，int8，640 输入：
 
-| 指标 | 数值 (RK3568, int8, 640 输入) |
+| 指标 | 数值 |
 | --- | --- |
-| 人形检测 | ~80 ms |
-| 装备检测 | ~75 ms / 人 |
-| 后处理解码 | 3 ~ 5 ms |
-| 画面无人 | ~82 ms（≈12 FPS） |
-| 画面 1 人 | ~158 ms（≈6 FPS） |
+| 一阶段推理（NPU，单模型） | ~80 ms |
+| 后处理解码 + 重合率关联 | 3 ~ 5 ms |
+| 画面无人 / 1 人 / 多人 | 基本相同，约 85 ms（≈12 FPS） |
 
-## 📁 目录结构
+这张表是按单模型推理推算的预期值：只跑一次推理，画面里几个人都不会明显增加耗时。换模型后上板跑一次 `./run.sh --bench 30` 实测，再按结果更新。
+
+## 目录结构
 
 ```
-├── app/          # 源码：入口、两级解码、合规状态机、推流、告警、录像、传感器
-├── config/       # 运行配置：safe_config_git.json(公开模板,可上传) / safe_config.json(私有,不入库)
+├── app/          # 入口、解码与重合率关联、合规状态机、推流、告警、录像、传感器
+├── config/       # safe_config_git.json（公开模板）/ safe_config.json（私有，不入库）
 ├── models/       # RKNN 模型与版本说明
 ├── deploy/       # systemd 单元、udev 规则、Node-RED 流程、部署脚本
 └── alerts/       # 告警截图与录像（运行产物，不入库）
 ```
 
-## 📝 项目背景
+## 模型
 
-工地要求"戴安全帽 + 穿反光安全衣"，人工巡查效率低、覆盖有限。本项目把检测、判定、告警、
-远程查看做成一个能在边缘板上长期无人值守运行的终端，视频与告警数据都留在本地，
-满足工业场景的隐私要求。
+一阶段模型基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)，在 Construction-PPE 数据集上训练，4 类 `person / helmet / no_helmet / vest`。
 
-## 🔗 相关链接
+### 版本约束
 
-- [RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2) —— 模型转换工具包
-- [Firefly Wiki](https://wiki.t-firefly.com/zh_CN/ROC-RK3568-PC/started.html) —— 开发板相关文档
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) —— YOLO 系列模型开发
-- [Tailscale](https://tailscale.com/) —— 内网穿透
-- [ntfy](https://ntfy.sh/) —— 手机推送
+模型版本必须和板端 librknnrt 同代：本板是 1.3.0，只认 version 2；用 2.x 工具链转出来的是 version 6，上板会加载失败。
 
-## 🧠 模型说明
+### 重新生成
 
-本项目采用两级检测架构，仅供学习与交流，非商业用途，使用的第三方模型遵循其原始许可证。
+模型文件放在 `models/`，转换脚本在 `../SafeDetect_Model_trans/`，完整步骤见 `models/模型部署介绍.md`。
 
-- **一级模型**：基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)（COCO 预训练权重）。
-- **二级模型**：基模来自开源项目 [Safety-Vest-and-Helmet-Detection](https://github.com/ADiTyaRaj8969/Safety-Vest-and-Helmet-Detection)。
+本项目仅供学习与交流，非商业用途。
 
----
+## 参考
 
-## 演示视频链接：https://b23.tv/N3P0mBH
-
-## 实物图
-<img width="1280" height="1068" alt="789e71524f091cfd9da9321d0ee1e9c4_720" src="https://github.com/user-attachments/assets/9af024b3-c68e-48ed-8cd2-d6eded7a3c2c" />
-
----
-联系邮箱：1995466@qq.com
+- [RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2)
+- [Firefly ROC-RK3568-PC 文档](https://wiki.t-firefly.com/zh_CN/ROC-RK3568-PC/started.html)
+- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
+- [Tailscale](https://tailscale.com/)
+- [ntfy](https://ntfy.sh/)
