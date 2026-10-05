@@ -6,7 +6,8 @@ SAFE: 带了安全帽和安全衣
 PARTIAL:带了安全帽或安全衣，但不是全套
 UNSAFE: 都没带
 
-输入：每帧二级模型给出的人体框与三态结论（SAFE / PARTIAL / UNSAFE）。
+输入：每帧一阶段模型（headcut_decode.analyze_frame）给出的人体框与三态结论
+      （SAFE / PARTIAL / UNSAFE）。状态机本身与模型无关，只依赖 box + status。
 处理：
   1. 用 IoU 把当前帧人体框与上一帧的“轨迹”贪心匹配（>= track_iou），
      匹配不上的人当新轨迹，连续丢帧超过 max_miss_frames 的轨迹删除；

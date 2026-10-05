@@ -81,7 +81,7 @@ def grid_arrays(img_size=640):
 def nms_per_class(boxes, scores, classes, iou_thres=0.45, max_candidates=300):
     """逐类 NMS（同类别才互相抑制）。boxes 为 xyxy。
 
-    性能说明（板端实测）：i8 量化的一级 COCO 模型每帧会产出几十上百个低分候选框，
+    性能说明（板端实测）：i8 量化的模型每帧会产出几十上百个低分候选框，
     原来用 Python 双重循环做 NMS，这种量级要 14~20ms —— 占掉整帧预算的 20%
     （日志里"无人时解码 18~25ms"就是它）。
     现在按分数降序、逐框用 numpy 向量化抑制（语义与逐框循环一致，结果不变），
@@ -129,7 +129,7 @@ def filter_person_boxes(boxes, scores, frame_shape=None, min_area=0.0025,
     """人体框过滤 + 排序：丢掉过小/贴边的框，按面积从大到小排序。
 
     min_area: 框面积占整幅画面比例下限（滤远处噪点，默认 0.25%）
-    max_persons: >0 时只保留面积最大的前 N 个人（限制二级推理次数）
+    max_persons: >0 时只保留面积最大的前 N 个人（限制输出人数；0 = 不限）
     """
     keep = []
     h, w = (frame_shape[0], frame_shape[1]) if frame_shape else (0, 0)
