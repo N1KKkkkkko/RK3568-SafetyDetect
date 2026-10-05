@@ -51,7 +51,18 @@ no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。�
 
 板端根文件系统是 overlayroot，底层 `/root-ro` 只读，可写层在 `/userdata`。告警截图和录像写在用户目录，按 `alerts.max_records`（默认 100 对）自动清理最旧的记录。内核较老（4.19）时 RGA 硬件缩放可能比 OpenCV 还慢，程序启动时会实测再决定用哪个，不需要手动设置。
 
-### 安装
+| 项 | 说明 |
+| --- | --- |
+| 硬件 | Firefly ROC-RK3568-PC（4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头 |
+| 系统 | Ubuntu 20.04.6 LTS，Python 3.8.10，内核 4.19.232 |
+| NPU | 驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 2.3.2（镜像预装） |
+| Python | numpy 1.24.4，OpenCV 5.0.0.93，paho-mqtt 2.1.0 |
+
+板端根文件系统是 overlayroot，底层 `/root-ro` 只读，可写层在 `/userdata`。告警截图和录像写在用户目录，按 `alerts.max_records`（默认 100 对）自动清理最旧的记录。内核较老（4.19）时 RGA 硬件缩放可能比 OpenCV 还慢，程序启动时会实测再决定用哪个，不需要手动设置。
+
+## 安装
+
+板端镜像一般已经装好 Python 依赖，先确认这几个系统命令：
 
 板端镜像一般已经装好 Python 依赖，先确认这几个系统命令：
 
@@ -66,7 +77,7 @@ sudo apt install -y ffmpeg            # 可选，用来把告警录像转成 H.2
 pip3 install -r requirements.txt
 ```
 
-### 配置
+## 配置
 
 ```bash
 cp config/safe_config_git.json config/safe_config.json
