@@ -170,12 +170,16 @@ class SafetyMonitor:
         max_confirm = max([tr.confirm for tr in self.tracks], default=0)
         if not persons and not any_alarm:
             status_text = "无人"
+            status_short = "NO PERSON"
         elif any_alarm:
             status_text = "违规告警 %d人" % max(1, len(alarm_persons))
+            status_short = "ALARM %d" % max(1, len(alarm_persons))
         elif max_confirm > 0:
             status_text = "疑似违规 %d/%d" % (max_confirm, self.confirm_frames)
+            status_short = "SUSPECT %d/%d" % (max_confirm, self.confirm_frames)
         else:
             status_text = "合规"
+            status_short = "OK"
 
         info = {
             "persons": persons,
@@ -190,6 +194,8 @@ class SafetyMonitor:
             "alarm_persons": alarm_persons,
             "tracks": len(self.tracks),
             "status_text": status_text,
+            # OSD 用 ASCII（cv2.putText 画不了中文，中文留给日志/MQTT）
+            "status_short": status_short,
         }
         self.last_info = info
         return info

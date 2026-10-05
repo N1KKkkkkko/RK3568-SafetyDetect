@@ -65,7 +65,8 @@ def video_to_h264(path):
     import shutil
     import subprocess
     if shutil.which("ffmpeg") is None:
-        print("提示: 未装 ffmpeg，输出视频保持 mp4v 编码（个别播放器可能打不开）")
+        print("提示: 未装 ffmpeg，无法转 H.264；当前编码可能个别播放器打不开")
+        print("      解决：sudo apt install ffmpeg（推荐），或改用 .avi 输出（MJPG，兼容性最好）")
         return path
     base, ext = os.path.splitext(path)
     tmp = base + "_h264.mp4"
@@ -85,6 +86,27 @@ def video_to_h264(path):
             continue
     print("转码失败，保留原编码（可用 ffmpeg 手动转）:", path)
     return path
+
+
+def open_video_writer(path, fps, size):
+    """按兼容性优先级挑编码器创建 VideoWriter，返回 (writer, codec)。
+
+    为什么要挑：OpenCV 的 VideoWriter 默认 mp4v（MPEG-4 Part 2），很多播放器/手机
+    打不开，而且改后缀并不会自动换编码器——后缀只影响容器。
+      .mp4  : avc1(H.264, 最好) -> MJPG(普遍可播) -> mp4v(兜底)
+      其它  : MJPG -> XVID -> mp4v
+    本机 FFmpeg 若带 libx264，avc1 就能直接出 H.264；否则退到 MJPG，
+    板端装了 ffmpeg 时 video_to_h264() 还会再把它转成 H.264。
+    """
+    ext = os.path.splitext(path)[1].lower()
+    candidates = (["avc1", "MJPG", "mp4v"] if ext == ".mp4"
+                  else ["MJPG", "XVID", "mp4v"])
+    for cc in candidates:
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*cc), fps, size)
+        if writer.isOpened():
+            return writer, cc
+        writer.release()
+    return None, None
 
 
 def on_unsafe(frame, info, alert_path=None):
@@ -482,7 +504,9 @@ def run_single_stage(frame, ppe_net, preproc, cfg):
 
 def draw_overlay(frame, info, infer_ms, status_ok_color=(0, 255, 0)):
     """画状态行 + 温度 + 耗时。"""
-    status = info["status_text"]
+    # OSD 用 ASCII：cv2.putText 的 Hershey 字体没有中文字形，画中文会变成 ??? 乱码；
+    # 中文状态仍保留在日志和 MQTT/ntfy 推送里（那些链路的字体正常）。
+    status = info.get("status_short") or info["status_text"]
     color = (0, 0, 255) if info["alarm"] else status_ok_color
     cv2.putText(frame, status, (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
     counts = info["counts"]
@@ -864,13 +888,13 @@ def main():
             if out_video:
                 if vw is None:
                     _h, _w = frame.shape[:2]
-                    _fourcc = cv2.VideoWriter_fourcc(
-                        *("mp4v" if out_video.lower().endswith(".mp4") else "MJPG"))
-                    vw = cv2.VideoWriter(out_video, _fourcc, out_fps, (_w, _h))
-                    if not vw.isOpened():
-                        print("WARN: 无法创建输出视频 %s（检查路径/扩展名）" % out_video)
+                    vw, _codec = open_video_writer(out_video, out_fps, (_w, _h))
+                    if vw is None:
+                        print("WARN: 无法创建输出视频 %s（检查路径/扩展名/编码器）" % out_video)
                         vw = None
                         out_video = None
+                    else:
+                        print("输出视频编码:", _codec, "->", out_video)
                 if vw is not None:
                     vw.write(frame)
                     out_frames += 1

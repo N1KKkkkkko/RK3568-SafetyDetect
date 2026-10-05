@@ -73,17 +73,22 @@ class ClipRecorder:
         else:
             base = "%s_%s" % (self.prefix, time.strftime("%Y%m%d_%H%M%S"))
         h, w = self.buf[-1].shape[:2] if self.buf else (360, 640)
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        # 优先直接写 MP4（MJPG 编码）；OpenCV 不支持时退回 AVI，保证录像不会静默失败。
-        path_mp4 = os.path.join(self.alertdir, base + ".mp4")
-        writer = cv2.VideoWriter(path_mp4, fourcc, 8.0, (w, h))
-        if writer.isOpened():
-            self.path = path_mp4
-        else:
-            writer.release()
-            path_avi = os.path.join(self.alertdir, base + ".avi")
-            writer = cv2.VideoWriter(path_avi, fourcc, 8.0, (w, h))
-            self.path = path_avi
+        # 编码器/容器要配对，按"普遍能播"的优先级挑：
+        #   avc1+mp4(H.264) -> MJPG+avi -> mp4v+mp4 -> XVID+avi
+        # 不要把 MJPG 塞进 mp4 容器：OpenCV 会静默改成 mp4v，很多播放器打不开。
+        candidates = [(base + ".mp4", "avc1"), (base + ".avi", "MJPG"),
+                      (base + ".mp4", "mp4v"), (base + ".avi", "XVID")]
+        writer = None
+        for fname, cc in candidates:
+            path = os.path.join(self.alertdir, fname)
+            wr = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*cc), 8.0, (w, h))
+            if wr.isOpened():
+                writer, self.path = wr, path
+                break
+            wr.release()
+        if writer is None:
+            print("WARN: 告警录像创建失败（无可用编码器），跳过本次录像")
+            return None
         self.writer = writer
         for f in self.buf:
             self.writer.write(f)
