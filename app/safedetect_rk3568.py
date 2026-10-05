@@ -25,6 +25,7 @@ import argparse
 import csv
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -164,11 +165,30 @@ def is_camera_source(source):
     return s.startswith(tuple(CAMERA_NODES))
 
 
+def camera_index(source):
+    """把摄像头设备路径解析成 V4L2 下标；解析不出来返回 None。
+
+    OpenCV 的 V4L2 后端只认下标，open(String) 直接失败，所以
+    /dev/video9 和软链 /dev/safecam（-> video9）都要先换算成 9 再打开。
+    """
+    try:
+        real = os.path.realpath(str(source))
+    except Exception:
+        return None
+    m = re.match(r"/dev/video(\d+)$", real)
+    return int(m.group(1)) if m else None
+
+
 def open_camera(source):
     """打开视频源。
 
     - 摄像头：V4L2 后端 + 低带宽格式预设（省带宽、降 CPU）
     - 视频文件/网络流：默认后端直接打开，不做分辨率/FOURCC 预设（那些是 V4L2 专有）
+
+    注意：OpenCV 的 V4L2 后端只接受**数字下标**，不认设备路径。直接传
+    '/dev/video9' 或 '/dev/safecam' 会失败并打印
+    "backend is generally available but can't be used to capture by name"，
+    所以这里先把设备路径解析成下标再打开；解析不出来才退回默认后端按名字打开。
     """
     if not is_camera_source(source):
         cap = cv2.VideoCapture(source)
@@ -180,11 +200,19 @@ def open_camera(source):
             fps = 0.0
         return cap, "VIDEO(%.1f fps)" % fps
 
-    try:
-        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
-    except Exception:
-        cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
+    cap = None
+    idx = camera_index(source)
+    if idx is not None:
+        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+    if cap is None or not cap.isOpened():
+        if cap is not None:
+            cap.release()
+        # 退路：默认后端（FFMPEG 支持按路径打开 v4l2 设备）
+        try:
+            cap = cv2.VideoCapture(source)
+        except Exception:
+            cap = None
+    if cap is None or not cap.isOpened():
         return None, None
     mjpeg = cv2.VideoWriter_fourcc("M", "J", "P", "G")
     picked_fmt = "YUYV"
