@@ -2,15 +2,21 @@
 
 当前版本：v2.0.0
 
-<<<<<<< HEAD
 跑在 Firefly ROC-RK3568-PC 上的工地着装检测程序：USB 摄像头输入，板端 NPU 推理，判断安全帽和反光衣有没有穿戴齐全，违规时保存截图和前后录像，通过 MQTT 推到手机，同时提供网页实时画面。所有推理、告警截图与视频数据均在本地处理与存储，远程访问通过加密内网通道完成，数据不出厂区，满足工业场景对隐私保护和低延迟的要求。
+
+## 推理演示
+
+原视频：
+
+<img width="360" height="197" alt="原视频" src="https://github.com/user-attachments/assets/e04823ec-9f39-46be-b48a-c2153423cfef" />
+
+识别结果：
+
+<img width="360" height="197" alt="识别" src="https://github.com/user-attachments/assets/ce409e14-b780-4fee-842e-d59c1dff40a2" />
 
 ## 背景
 
 工地要求作业人员佩戴安全帽、穿反光安全衣，但传统人工巡查效率低、覆盖有限，难以做到全天候、全区域监管。为此，本项目基于 RK3568 设计了一套边缘 AI 安全终端，将目标检测、违规判定、声光告警与远程查看集成在一块低功耗开发板上，支持 7×24 小时无人值守运行。
-=======
-跑在 Firefly ROC-RK3568-PC 上的工地着装检测程序：USB 摄像头输入，板端 NPU 推理，判断安全帽和反光衣有没有穿戴齐全，违规时保存截图和前后录像，通过 MQTT 推到手机，同时提供网页实时画面。检测全程在本机完成，不上云。
->>>>>>> 63ca520 (README：按章节层级重排，标注正式版 v2.0.0)
 
 ## 功能
 
@@ -24,7 +30,7 @@
 
 ## 检测方案
 
-用单个 YOLOv8n 模型（4 类：person / helmet / no_helmet / vest）做一次推理，同时得到人框和帽/衣框，再按"装备框落在人框内的重合率"把装备归属到人。
+用单个 YOLOv8n 模型（4 类：person / helmet / no_helmet / vest）做一次推理，同时得到人框和帽/衣框，再把装备归属到对应的人。
 
 ### 三态判定
 
@@ -32,7 +38,13 @@
 - 只匹配到其中一样：PARTIAL
 - 都没匹配到：UNSAFE
 
-no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。重合率用的是装备框面积占比（交集 / 装备框面积），不是 IoU——人框和帽子框尺寸差得多，用 IoU 会趋近于零。
+no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。
+
+### 装备归属
+
+归属按"装备框落在该人对应部位区域内的比例"计算（分母是装备框面积）：安全帽看人框上方的头部区域（向上外扩 30%，因为头顶常伸出人框），反光衣看躯干区域；再与"装备框落在人框内的比例"取大作为兜底。
+
+多人重叠时，把所有候选按比例从高到低贪心分配，**每人最多一顶安全帽 + 一件反光衣**，每件装备只给一个人，避免"一个人抢走两件、旁边的人一件都没有"。详细分析和验证见 `docs/多人重叠装备归属修复报告.md`。
 
 ### 单模型与两级方案
 
@@ -45,18 +57,6 @@ no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。�
 ## 部署
 
 ### 环境
-<<<<<<< HEAD
-
-| 项 | 说明 |
-| --- | --- |
-| 硬件 | Firefly ROC-RK3568-PC（4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头 |
-| 系统 | Ubuntu 20.04.6 LTS，Python 3.8.10，内核 4.19.232 |
-| NPU | 驱动 0.8.2 + librknnrt 1.3.0，配套 rknn-toolkit-lite2 2.3.2（镜像预装） |
-| Python | numpy 1.24.4，OpenCV 5.0.0.93，paho-mqtt 2.1.0 |
-
-板端根文件系统是 overlayroot，底层 `/root-ro` 只读，可写层在 `/userdata`。告警截图和录像写在用户目录，按 `alerts.max_records`（默认 100 对）自动清理最旧的记录。内核较老（4.19）时 RGA 硬件缩放可能比 OpenCV 还慢，程序启动时会实测再决定用哪个，不需要手动设置。
-=======
->>>>>>> 63ca520 (README：按章节层级重排，标注正式版 v2.0.0)
 
 | 项 | 说明 |
 | --- | --- |
@@ -68,8 +68,6 @@ no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。�
 板端根文件系统是 overlayroot，底层 `/root-ro` 只读，可写层在 `/userdata`。告警截图和录像写在用户目录，按 `alerts.max_records`（默认 100 对）自动清理最旧的记录。内核较老（4.19）时 RGA 硬件缩放可能比 OpenCV 还慢，程序启动时会实测再决定用哪个，不需要手动设置。
 
 ### 安装
-
-板端镜像一般已经装好 Python 依赖，先确认这几个系统命令：
 
 板端镜像一般已经装好 Python 依赖，先确认这几个系统命令：
 
@@ -129,7 +127,7 @@ RK3568，int8，640 输入：
 | 指标 | 数值 |
 | --- | --- |
 | 一阶段推理（NPU，单模型） | ~80 ms |
-| 后处理解码 + 重合率关联 | 3 ~ 5 ms |
+| 后处理解码 + 装备归属 | 3 ~ 5 ms |
 | 画面无人 / 1 人 / 多人 | 基本相同，约 85 ms（≈12 FPS） |
 
 这张表是按单模型推理推算的预期值：只跑一次推理，画面里几个人都不会明显增加耗时。换模型后上板跑一次 `./run.sh --bench 30` 实测，再按结果更新。
@@ -137,7 +135,7 @@ RK3568，int8，640 输入：
 ## 目录结构
 
 ```
-├── app/          # 入口、解码与重合率关联、合规状态机、推流、告警、录像、传感器
+├── app/          # 入口、解码与装备归属、合规状态机、推流、告警、录像、传感器
 ├── config/       # safe_config_git.json（公开模板）/ safe_config.json（私有，不入库）
 ├── models/       # RKNN 模型与版本说明
 ├── deploy/       # systemd 单元、udev 规则、Node-RED 流程、部署脚本
@@ -146,7 +144,7 @@ RK3568，int8，640 输入：
 
 ## 模型
 
-一阶段模型基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)，在 Construction-PPE 数据集上训练，4 类 `person / helmet / no_helmet / vest`。
+一阶段模型基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)，在 Construction-PPE 数据集上训练，4 类 `person / helmet / no_helmet / vest`，本项目仅供学习与交流，非商业用途。
 
 ### 版本约束
 
@@ -154,17 +152,14 @@ RK3568，int8，640 输入：
 
 ### 重新生成
 
-模型文件放在 `models/`，转换脚本在 `../SafeDetect_Model_trans/`，完整步骤见 `models/模型部署介绍.md`。
+模型文件放在 `models/`，转换脚本在 `../SafeDetect_Model_trans/`。
 
-本项目仅供学习与交流，非商业用途。
+## 演示视频与实物图
 
-<<<<<<< HEAD
-=======
-## 背景
+演示视频：<https://b23.tv/N3P0mBH>
 
-工地要求戴安全帽、穿反光安全衣。人工巡查效率低、覆盖有限，所以把检测、判定、告警和远程查看做成一个能在边缘板上长期无人值守运行的终端。视频和告警数据都留在本地，满足工业场景对隐私的要求。
+<img width="1280" height="1068" alt="实物图" src="https://github.com/user-attachments/assets/9af024b3-c68e-48ed-8cd2-d6eded7a3c2c" />
 
->>>>>>> 63ca520 (README：按章节层级重排，标注正式版 v2.0.0)
 ## 参考
 
 - [RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2)
@@ -172,3 +167,5 @@ RK3568，int8，640 输入：
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
 - [Tailscale](https://tailscale.com/)
 - [ntfy](https://ntfy.sh/)
+
+联系邮箱：1995466@qq.com
