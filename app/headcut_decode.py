@@ -236,9 +236,34 @@ def containment_ratio(inner, outer):
     return inter / (area + 1e-9)
 
 
+def _part_overlap(gear_box, person_box, is_helmet):
+    """装备框落在"它该在的人体部位"里的比例（分母是装备框面积）。
+
+    只看"装备框在不在人框里"在多人重叠时会失效：邻居的框也把帽子整个包住，
+    重合率同样是 100%，分不出该给谁。所以这里分部位看：
+      头盔 -> 人体框上方的头部区域，并**向上外扩 30%**（头顶常常伸出人框边界）；
+      反光衣 -> 躯干区域（纵向 15%~85%）。
+    """
+    x1, y1, x2, y2 = person_box
+    hh, ww = y2 - y1, x2 - x1
+    if is_helmet:
+        zone = (x1 - 0.10 * ww, y1 - 0.30 * hh, x2 + 0.10 * ww, y1 + 0.50 * hh)
+    else:
+        zone = (x1, y1 + 0.15 * hh, x2, y1 + 0.85 * hh)
+    return containment_ratio(gear_box, zone)
+
+
 def match_gear_to_persons(pboxes, pscores, gboxes, gscores, gclasses,
                           overlap_thr=0.5):
-    """把每个帽/衣框分配给"重合率最高、且达到阈值"的那个人，输出三态结论。
+    """把每个帽/衣框分配给最可能的主人，输出三态结论。
+
+    规则：
+      1) 每个 (装备, 人) 组合先按"落在该人对应部位区域的比例"打分，同时把
+         "装备框落在人框内的比例"作为兜底，两者取大；达到 overlap_thr 才算候选；
+      2) 候选按分数（同分看装备置信度）从高到低贪心分配，**每人最多一顶安全帽
+         + 一件反光衣**，每件装备只分给一个人。
+    这样多人重叠时不会出现"一个人把两顶帽子都抢走、旁边的人什么都没有"；
+    头盔在人框上方一点也能正确归属。
 
     返回的每个人是一个 dict：
       box / score / status / helmet_conf / vest_conf / n_boxes
@@ -250,22 +275,32 @@ def match_gear_to_persons(pboxes, pscores, gboxes, gscores, gclasses,
                         "helmet_conf": 0.0, "vest_conf": 0.0,
                         "helmet_box": None, "vest_box": None, "n_boxes": 0})
 
-    for gb, gs, gc in zip(gboxes, gscores, gclasses):
-        best_i, best_r = -1, 0.0
-        for i, p in enumerate(persons):
-            r = containment_ratio(gb, p["box"])
-            if r > best_r:
-                best_r, best_i = r, i
-        if best_i < 0 or best_r < overlap_thr:
-            continue                      # 不属于任何人（或与所有框重合太低）的装备框丢弃
-        p = persons[best_i]
-        p["n_boxes"] += 1
-        if int(gc) == OWN_CLASS_HELMET and float(gs) > p["helmet_conf"]:
+    # 收集候选 (部位得分, 装备置信度, 装备序号, 人序号, 类别)
+    candidates = []
+    for g_i, (gb, gs, gc) in enumerate(zip(gboxes, gscores, gclasses)):
+        is_helmet = int(gc) == OWN_CLASS_HELMET
+        for p_i, p in enumerate(persons):
+            part = _part_overlap(gb, p["box"], is_helmet)
+            cont = containment_ratio(gb, p["box"])
+            if max(part, cont) >= overlap_thr:
+                candidates.append((part, float(gs), g_i, p_i, int(gc)))
+    candidates.sort(reverse=True)
+
+    used = set()
+    for _part, gs, g_i, p_i, gc in candidates:
+        if g_i in used:
+            continue
+        p = persons[p_i]
+        if gc == OWN_CLASS_HELMET and p["helmet_conf"] == 0.0:
             p["helmet_conf"] = float(gs)
-            p["helmet_box"] = [float(v) for v in gb]
-        elif int(gc) == OWN_CLASS_VEST and float(gs) > p["vest_conf"]:
+            p["helmet_box"] = [float(v) for v in gboxes[g_i]]
+        elif gc == OWN_CLASS_VEST and p["vest_conf"] == 0.0:
             p["vest_conf"] = float(gs)
-            p["vest_box"] = [float(v) for v in gb]
+            p["vest_box"] = [float(v) for v in gboxes[g_i]]
+        else:
+            continue                      # 这个人已经有同类装备了，留给别人
+        used.add(g_i)
+        p["n_boxes"] += 1
 
     for p in persons:
         if p["helmet_conf"] > 0.0 and p["vest_conf"] > 0.0:
