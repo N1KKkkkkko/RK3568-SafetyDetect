@@ -6,13 +6,7 @@
 
 ## 推理演示
 
-原视频：
-
-<img width="360" height="197" alt="原视频" src="https://github.com/user-attachments/assets/e04823ec-9f39-46be-b48a-c2153423cfef" />
-
-识别结果：
-
-<img width="360" height="197" alt="识别" src="https://github.com/user-attachments/assets/ce409e14-b780-4fee-842e-d59c1dff40a2" />
+![演示图](images_test/merged_image.jpg)
 
 ## 背景
 
