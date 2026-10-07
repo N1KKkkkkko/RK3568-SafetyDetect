@@ -24,7 +24,7 @@
 
 ## 检测方案
 
-用单个 YOLOv8n 模型（4 类：person / helmet / no_helmet / vest）做一次推理，同时得到人框和帽/衣框，再把装备归属到对应的人。
+用单个 YOLOv8n 模型（3 类：person / helmet / vest）做一次推理，同时得到人框和帽/衣框，再把装备归属到对应的人。
 
 ### 三态判定
 
@@ -32,7 +32,7 @@
 - 只匹配到其中一样：PARTIAL
 - 都没匹配到：UNSAFE
 
-no_helmet 类不参与判定，没戴帽的人由"匹配不到 helmet"得出。
+没戴帽的人由"匹配不到 helmet"得出。
 
 ### 装备归属
 
@@ -136,11 +136,26 @@ RK3568，int8，640 输入：
 
 ## 模型
 
-一阶段模型基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)，在 Construction-PPE 数据集上训练，4 类 `person / helmet / no_helmet / vest`，本项目仅供学习与交流，非商业用途。
+一阶段模型基于 [Ultralytics YOLOv8n](https://github.com/ultralytics/ultralytics)，在 Construction-PPE 数据集上微调，3 类 `person / helmet / vest`，测试集 mAP50 0.882、mAP50-95 0.503（141 张测试图）。模型文件在 `models/`，本项目仅供学习与交流，非商业用途。
 
 ### 版本约束
 
 模型版本必须和板端 librknnrt 同代：本板是 1.3.0，只认 version 2；用 2.x 工具链转出来的是 version 6，上板会加载失败。
+
+### 关于 3 类版（own_best_3c）
+
+早期训练的是 4 类（person / helmet / no_helmet / vest）。其中 `no_helmet` 在部署时从不参与判定（判定只看 person / helmet / vest），却是个长尾难类（训练 400 个实例、AP50 仅 0.17），会把整体 mAP 拉低一大截。
+
+现在的 `own_best_3c` 是把该类的分类头裁掉后的版本：**除该路权重外其余权重完全不变**，因此三类精度与原模型的三类口径一致：
+
+| 类 | AP50 |
+| --- | --- |
+| person | 0.807 |
+| helmet | 0.929 |
+| vest | 0.910 |
+| **3 类平均 mAP50** | **0.882**（mAP50-95 0.503） |
+
+板端判定结果与 4 类版完全一致（同一测试集：SAFE 155 / PARTIAL 27 / UNSAFE 46），所以这是一次纯粹的"瘦身 + 口径对齐"，不是重新训练。
 
 ### 重新生成
 

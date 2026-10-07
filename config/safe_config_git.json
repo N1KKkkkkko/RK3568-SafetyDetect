@@ -81,14 +81,13 @@
     "force_status": ""
   },
   "model": {
-    "_note": "一阶段 own_best_i8.rknn (4类: 0 person / 1 helmet / 2 no_helmet / 3 vest)。一次推理同时出人+帽+衣，按重合率关联判定；no_helmet 不参与判定。模型名不带路径时按 models/ 查找。",
-    "ppe_rknn": "own_best_i8.rknn",
+    "_note": "一阶段 own_best_3c_i8.rknn (3类: 0 person / 1 helmet / 2 vest)。一次推理同时出人+帽+衣，按部位区域重合率关联判定；没戴帽靠匹配不到 helmet 判出。模型名不带路径时按 models/ 查找。",
+    "ppe_rknn": "own_best_3c_i8.rknn",
     "ppe_img_size": 640,
-    "ppe_nc": 4,
+    "ppe_nc": 3,
     "class_person": 0,
     "class_helmet": 1,
-    "class_no_helmet": 2,
-    "class_vest": 3
+    "class_vest": 2
   },
   "runtime": {
     "_note": "运行参数：source=视频源(0=USB 摄像头编号 / rtsp:// / 视频文件路径，按实际填写)；stream=MJPEG 实时预览端口(8090，填 0 关闭)；alertdir=告警截图录像目录(相对包根)；fps=估算帧率；core=NPU核心(AUTO/0/1/2)；stream_width/stream_quality=预览尺寸与画质；keep_alive_no_camera=无摄像头时是否常驻(占位画面)",

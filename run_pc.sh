@@ -39,10 +39,10 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-ONNX="${ONNX:-$DIR/models/own_best_headcut.onnx}"
+ONNX="${ONNX:-$DIR/models/own_best_3c_headcut.onnx}"
 if [ ! -f "$ONNX" ]; then
   echo "找不到 ONNX 模型: $ONNX"
-  echo "PC 送测用的是 headcut ONNX（models/own_best_headcut.onnx），不是 rknn。"
+  echo "PC 送测用的是 headcut ONNX（models/own_best_3c_headcut.onnx），不是 rknn。"
   exit 1
 fi
 

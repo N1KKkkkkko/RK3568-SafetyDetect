@@ -5,12 +5,12 @@ RK3568 安全帽/反光衣（PPE）检测入口（板端主程序，一阶段单
 
 架构总览（数据流）：
   USB摄像头
-      1. 主循环：own_best_i8.rknn（4 类 person/helmet/no_helmet/vest）
-         一次推理同时得到人框和帽/衣框 -> 按"重合率"把人框和帽/衣框关联：
+      1. 主循环：own_best_3c_i8.rknn（3 类 person/helmet/vest）
+         一次推理同时得到人框和帽/衣框 -> 按"部位区域重合率"把人框和帽/衣框关联：
              同时匹配到 helmet + vest -> SAFE
              只匹配到一个             -> PARTIAL
              都没匹配到               -> UNSAFE
-         no_helmet 不参与判定（按需求忽略），没戴帽的人靠"匹配不到 helmet"判出来。
+         没戴帽的人靠"匹配不到 helmet"判出来。
       2. 合规状态机 SafetyMonitor（逐人 IoU 跟踪 + 连续帧确认 + 上升沿触发）
       3. 告警（MQTT -> Node-RED -> ntfy 手机推送 / 截图 + 前后录像）
       4. MJPEG 网页预览（stream_server，手机浏览器可远程看画面）
@@ -675,9 +675,8 @@ def main():
     preproc = RgaAccel(str(cfg["preprocess"]))
     print("预处理:", preproc.info())
     print("一阶段模型:", ppe_path, "img", md["ppe_img_size"], "nc", md["ppe_nc"],
-          "(person=%s helmet=%s no_helmet=%s vest=%s, no_helmet 不参与判定)"
-          % (md["class_person"], md["class_helmet"], md["class_no_helmet"],
-             md["class_vest"]))
+          "(person=%s helmet=%s vest=%s)"
+          % (md["class_person"], md["class_helmet"], md["class_vest"]))
     ppe_net = init_rknn(ppe_path, core_map[core])
 
     # ---------------- 性能基准（--bench N） ----------------

@@ -30,15 +30,14 @@ DEFAULTS = {
     "safety_rules": {"confirm_frames": 5, "clear_frames": 15,
                      "alert_on": ["UNSAFE", "PARTIAL"],
                      "track_iou": 0.30, "max_miss_frames": 30},
-    # 一阶段：单个 4 类模型（person/helmet/no_helmet/vest），一次推理出人+装备
+    # 一阶段：单个 3 类模型（person/helmet/vest），一次推理出人+装备
     "detect": {"conf_person": 0.35, "conf_gear": 0.25, "iou": 0.45,
                # gear_overlap=帽/衣框落在人框内的重合率下限（重合率，不是 IoU）
                "gear_overlap": 0.5, "min_person_area": 0.0025,
                # max_persons: >0 时每帧只保留最大的前 N 个人（0=不限）
                "max_persons": 0, "force_status": ""},
-    "model": {"ppe_rknn": "own_best_i8.rknn", "ppe_img_size": 640, "ppe_nc": 4,
-              "class_person": 0, "class_helmet": 1, "class_no_helmet": 2,
-              "class_vest": 3},
+    "model": {"ppe_rknn": "own_best_3c_i8.rknn", "ppe_img_size": 640, "ppe_nc": 3,
+              "class_person": 0, "class_helmet": 1, "class_vest": 2},
     "preprocess": "auto",
     # 运行时参数：默认来自这里，命令行 --xxx 覆盖
     # 端口约定：MJPEG 预览 8090、告警图片/录像 8092（避开 8080/8082 等常用端口）

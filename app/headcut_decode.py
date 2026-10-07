@@ -6,13 +6,15 @@
   outputs[0] box DFL logits  (1, 64, anchors)   4 边 x 16 bins
   outputs[1] class scores    (1, nc, anchors)   已过 sigmoid
 
-本包用【一阶段】模型 own_best（nc=4）：
-  0 person / 1 helmet / 2 no_helmet / 3 vest
-一次推理同时出人框和帽/衣框，再用"重合率"把人框和帽/衣框关联起来判定：
+本包用【一阶段】模型 own_best_3c（nc=3）：
+  0 person / 1 helmet / 2 vest
+一次推理同时出人框和帽/衣框，再按"落在该人对应部位区域内的比例"归属判定：
   同时匹配到 helmet 和 vest -> SAFE
   只匹配到其中一个        -> PARTIAL
   都没匹配到              -> UNSAFE
-**no_helmet 不参与判定**（按需求忽略；没戴帽的人靠"匹配不到 helmet"判出来）。
+
+注：早先的 4 类版模型多一个 no_helmet 类但从不参与判定；现用的 3 类模型是把
+该类的分类头裁掉后的版本（权重不变），没戴帽的人仍靠"匹配不到 helmet"判出来。
 """
 import cv2
 import numpy as np
@@ -171,15 +173,14 @@ def draw_gear(img, box, status, helmet_conf=0.0, vest_conf=0.0, track_id=None,
 
 
 # ======================================================================
-# 一阶段模型 own_best（nc=4）专用：一次推理出人 + 帽 + 衣，重合率关联
+# 一阶段模型 own_best_3c（nc=3）：一次推理出人 + 帽 + 衣，按部位区域归属
 # ======================================================================
-OWN_NC = 4
+OWN_NC = 3
 OWN_CLASS_PERSON = 0
 OWN_CLASS_HELMET = 1
-OWN_CLASS_NO_HELMET = 2   # 按需求忽略，不参与判定
-OWN_CLASS_VEST = 3
+OWN_CLASS_VEST = 2
 
-# 参与判定的类别（no_helmet 明确排除）
+# 参与判定的类别
 OWN_USE_CLASSES = (OWN_CLASS_PERSON, OWN_CLASS_HELMET, OWN_CLASS_VEST)
 
 
@@ -187,9 +188,7 @@ def decode_det(outputs, conf=0.25, iou=0.45, img_size=640, nc=OWN_NC,
                classes=None):
     """在给定类别子集内做 argmax 解码（返回 boxes xyxy 模型尺度, scores, classes）。
 
-    先截取 classes 指定的列再做 argmax：这样排除 no_helmet 之后，
-    一个既有 helmet 分、又有 no_helmet 分的锚点仍会按 helmet 参与判定，
-    而不是被 no_helmet 抢占后丢掉。
+    先截取 classes 指定的列再做 argmax，只在这些类里比较。
     """
     scores = np.asarray(outputs[1], dtype=np.float32).reshape(nc, -1).T
     if classes is not None:

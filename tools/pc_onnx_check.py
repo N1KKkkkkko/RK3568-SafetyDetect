@@ -12,9 +12,9 @@
   --dir    一个目录（jpg/jpeg/png 批量）
   --video  视频文件（逐帧处理，可选输出标注视频和逐帧 CSV）
 
-一阶段判定（own_best，4 类 person/helmet/no_helmet/vest）：
+一阶段判定（own_best_3c，3 类 person/helmet/vest）：
   一次推理出人框 + 帽/衣框，按部位区域（头盔看头部、反光衣看躯干）归属装备：
-  同时匹配到帽+衣=SAFE，只匹配到一个=PARTIAL，都没匹配到=UNSAFE。no_helmet 不参与判定。
+  同时匹配到帽+衣=SAFE，只匹配到一个=PARTIAL，都没匹配到=UNSAFE。
 
 依赖（PC 端，不是板端）：pip install onnxruntime opencv-python numpy
 一般不需要直接调用本脚本，用仓库根目录的 run_pc.sh 即可。
@@ -221,7 +221,7 @@ def main():
     ap.add_argument("--out-csv", default=None, help="视频模式：逐帧每人状态写 CSV")
     ap.add_argument("--max-frames", type=int, default=0, help="视频模式只处理前 N 帧（0=全部）")
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--nc", type=int, default=4)
+    ap.add_argument("--nc", type=int, default=3)
     ap.add_argument("--conf-person", type=float, default=0.35)
     ap.add_argument("--conf-gear", type=float, default=0.25)
     ap.add_argument("--iou", type=float, default=0.45)
