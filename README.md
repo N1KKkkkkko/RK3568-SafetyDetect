@@ -52,7 +52,7 @@
 
 ### 环境
 
-| 项 | 说明 |
+| 环境 | 说明 |
 | --- | --- |
 | 硬件 | Firefly ROC-RK3568-PC（4×Cortex-A55 / 4GB RAM / eMMC），USB UVC 摄像头 |
 | 系统 | Ubuntu 20.04.6 LTS，Python 3.8.10，内核 4.19.232 |
